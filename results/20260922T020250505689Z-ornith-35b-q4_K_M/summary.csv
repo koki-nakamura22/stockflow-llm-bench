@@ -1,0 +1,7 @@
+model,track,task,evaluator_status,capability_score,code_health_score,agent_status,turns,prompt_tokens,completion_tokens,duration_seconds,public_tests_unchanged,run_dir
+ornith:35b-q4_K_M,zero_to_one,A00,completed,100,100.0,model_error,22,240936,12349,1734.593,True,./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/zero_to_one/A00
+ornith:35b-q4_K_M,controlled_cold_change,C01,completed,100,90.0,completed,14,140066,5552,284.286,True,./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/controlled_cold_change/C01
+ornith:35b-q4_K_M,controlled_cold_change,C02,completed,9,85.0,completed,31,561030,16997,906.444,True,./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/controlled_cold_change/C02
+ornith:35b-q4_K_M,controlled_cold_change,C03,completed,100,100.0,completed,9,75250,2405,154.434,True,./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/controlled_cold_change/C03
+ornith:35b-q4_K_M,controlled_cold_change,C04,completed,100,100.0,completed,30,444580,7112,419.723,True,./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/controlled_cold_change/C04
+ornith:35b-q4_K_M,controlled_cold_change,C05,error,0,100.0,context_exceeded,13,318751,29722,1542.934,True,./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/controlled_cold_change/C05

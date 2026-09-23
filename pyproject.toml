@@ -1,0 +1,15 @@
+[project]
+name = "stockflow-local-llm-benchmark"
+version = "0.2.2"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+stockflow-bench = "bench.cli:main"
+
+[tool.ruff]
+line-length = 100
+
+[tool.mypy]
+python_version = "3.11"
+

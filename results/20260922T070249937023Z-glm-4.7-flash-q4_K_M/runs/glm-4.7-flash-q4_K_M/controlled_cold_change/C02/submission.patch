@@ -1,0 +1,246 @@
+diff --git a/alembic/versions/0002_add_idempotency.py b/alembic/versions/0002_add_idempotency.py
+new file mode 100644
+index 0000000..20f98ad
+--- /dev/null
++++ b/alembic/versions/0002_add_idempotency.py
+@@ -0,0 +1,28 @@
++"""add idempotency support"""
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++
++
++revision = "0002_add_idempotency"
++down_revision = "0001_initial"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.create_table(
++        "idempotency_keys",
++        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
++        sa.Column("tenant_id", postgresql.UUID(as_uuid=True), nullable=False),
++        sa.Column("key", sa.String(128), nullable=False),
++        sa.Column("request_hash", sa.String(64), nullable=False),
++        sa.Column("order_id", postgresql.UUID(as_uuid=True), nullable=False),
++        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
++    )
++    op.create_index("ix_idempotency_keys_tenant_key", "idempotency_keys", ["tenant_id", "key"])
++    op.create_index("ix_idempotency_keys_order_id", "idempotency_keys", ["order_id"])
++
++
++def downgrade() -> None:
++    op.drop_table("idempotency_keys")
+\ No newline at end of file
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..8d9d26f 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,3 +1,4 @@
++import hashlib
+ import uuid
+ from collections import defaultdict
+ from typing import Any
+@@ -10,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+-from stockflow.models import Order, OrderItem, Product
++from stockflow.models import IdempotencyKey, Order, OrderItem, Product
+ from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
+ 
+ app = FastAPI(title="StockFlow Mini")
+@@ -24,6 +25,80 @@ class ApiError(Exception):
+         self.details = details or {}
+ 
+ 
++class IdempotencyService:
++    @staticmethod
++    def normalize_request(body: OrderCreate) -> str:
++        """Normalize request for idempotency check"""
++        # Sort items by product_id to ensure consistent hashing
++        sorted_items = sorted(body.items, key=lambda item: str(item.product_id))
++        normalized = {
++            "items": [
++                {"product_id": str(item.product_id), "quantity": item.quantity}
++                for item in sorted_items
++            ]
++        }
++        return hashlib.sha256(
++            str(normalized).encode("utf-8")
++        ).hexdigest()
++
++    @staticmethod
++    def get_idempotency_key(
++        x_tenant_id: str | None = Header(default=None),
++        idempotency_key: str | None = Header(default=None),
++    ) -> tuple[uuid.UUID, str]:
++        """Extract and validate idempotency key"""
++        try:
++            if x_tenant_id is None:
++                raise ValueError
++            tenant_id = uuid.UUID(x_tenant_id)
++        except ValueError as exc:
++            raise ApiError(400, "INVALID_TENANT", "X-Tenant-Id must be a UUID") from exc
++
++        if idempotency_key is None:
++            raise ApiError(400, "MISSING_IDEMPOTENCY_KEY", "Idempotency-Key header is required")
++
++        return tenant_id, idempotency_key
++
++    def check_key_exists(
++        self,
++        session: Session,
++        tenant_id: uuid.UUID,
++        key: str,
++        request_hash: str,
++    ) -> uuid.UUID | None:
++        """Check if idempotency key exists and matches request hash"""
++        stmt = (
++            select(IdempotencyKey)
++            .where(
++                IdempotencyKey.tenant_id == tenant_id,
++                IdempotencyKey.key == key,
++                IdempotencyKey.request_hash == request_hash,
++            )
++        )
++        result = session.scalar(stmt)
++        if result and result.order_id:
++            return result.order_id
++        return None
++
++    def store_key(
++        self,
++        session: Session,
++        tenant_id: uuid.UUID,
++        key: str,
++        request_hash: str,
++        order_id: uuid.UUID,
++    ) -> None:
++        """Store idempotency key"""
++        idempotency_key = IdempotencyKey(
++            tenant_id=tenant_id,
++            key=key,
++            request_hash=request_hash,
++            order_id=order_id,
++        )
++        session.add(idempotency_key)
++        session.commit()
++
++
+ def error_body(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
+     return {"error": {"code": code, "message": message, "details": details or {}}}
+ 
+@@ -109,6 +184,26 @@ def create_order(
+     tenant: uuid.UUID = Depends(tenant_id),
+     session: Session = Depends(get_session),
+ ) -> Order:
++    # Check idempotency key
++    tenant_id, key = IdempotencyService.get_idempotency_key(
++        x_tenant_id=tenant,
++        idempotency_key=body.idempotency_key,
++    )
++    request_hash = IdempotencyService.normalize_request(body)
++
++    # Check existing key
++    existing_order_id = IdempotencyService.check_key_exists(
++        session, tenant_id, key, request_hash
++    )
++    if existing_order_id:
++        existing_order = load_order(session, tenant_id, existing_order_id)
++        if existing_order.status in ["PENDING", "CONFIRMED", "COMPLETED"]:
++            session.expire_all()
++            return existing_order
++        else:
++            raise ApiError(409, "IDEMPOTENCY_CONFLICT", "Request hash differs from previous request")
++
++    # Create new order
+     quantities: dict[uuid.UUID, int] = defaultdict(int)
+     for item in body.items:
+         quantities[item.product_id] += item.quantity
+@@ -127,7 +222,7 @@ def create_order(
+         for product in products:
+             if product.stock < quantities[product.id]:
+                 raise ApiError(409, "INSUFFICIENT_STOCK", "Insufficient stock")
+-        order = Order(tenant_id=tenant, status="PENDING", total_amount=0)
++        order = Order(tenant_id=tenant, status="PENDING", total_amount=0, idempotency_key=key)
+         session.add(order)
+         session.flush()
+         total = 0
+@@ -149,6 +244,12 @@ def create_order(
+             )
+         order.total_amount = total
+         session.commit()
++        # Store idempotency key
++        IdempotencyService.store_key(session, tenant_id, key, request_hash, order.id)
++    except IntegrityError:
++        # Handle potential race condition
++        session.rollback()
++        raise ApiError(409, "ORDER_ALREADY_EXISTS", "Order already exists") from None
+     except ApiError:
+         session.rollback()
+         raise
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..a4c2300 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -38,6 +38,7 @@ class Order(Base):
+     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+     status: Mapped[str] = mapped_column(String(20), default="PENDING")
+     total_amount: Mapped[int] = mapped_column(Integer)
++    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+     updated_at: Mapped[datetime] = mapped_column(
+         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+@@ -67,3 +68,17 @@ class OrderItem(Base):
+     line_amount: Mapped[int] = mapped_column(Integer)
+     order: Mapped[Order] = relationship(back_populates="items")
+ 
++
++class IdempotencyKey(Base):
++    __tablename__ = "idempotency_keys"
++    __table_args__ = (
++        CheckConstraint("key ~ '^[\x01-\x7F]{1,128}$'", name="ck_idempotency_key_ascii"),
++    )
++
++    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
++    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
++    key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
++    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
++    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
++    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
++
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..75166f4 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -1,7 +1,8 @@
+ import uuid
++import hashlib
+ from datetime import datetime
+ 
+-from pydantic import BaseModel, ConfigDict, Field
++from pydantic import BaseModel, ConfigDict, Field, field_validator
+ 
+ 
+ class ProductCreate(BaseModel):
+@@ -26,6 +27,18 @@ class OrderItemCreate(BaseModel):
+ 
+ class OrderCreate(BaseModel):
+     items: list[OrderItemCreate] = Field(min_length=1)
++    idempotency_key: str = Field(min_length=1, max_length=128)
++
++    @field_validator("idempotency_key")
++    @classmethod
++    def validate_idempotency_key(cls, v: str) -> str:
++        # ASCII 1-128 characters
++        if not v or len(v) < 1 or len(v) > 128:
++            raise ValueError("Idempotency key must be 1-128 ASCII characters")
++        # Check if all characters are ASCII (1-127)
++        if any(ord(c) > 127 for c in v):
++            raise ValueError("Idempotency key must be ASCII characters only")
++        return v
+ 
+ 
+ class OrderItemOut(BaseModel):

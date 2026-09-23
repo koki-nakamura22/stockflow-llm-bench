@@ -1,0 +1,9 @@
+{
+  "model": "gpt-oss:20b",
+  "adapter": "ollama",
+  "think": "medium",
+  "context_window": 32768,
+  "context_guard_tokens": 24576,
+  "max_no_tool_turns": 3,
+  "max_turns": 40
+}

@@ -1,0 +1,39 @@
+{
+  "model": "qwen3.6:35b-a3b",
+  "track": "controlled_cold_change",
+  "task": "C05",
+  "started_at": "2026-09-21T13:46:31.494769+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repeat_penalty": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "## Rolling Migration: tax_amount expansion - Completed\n\n### Changes Made:\n\n1. **`stockflow/models.py`**: Added `subtotal_amount` and `tax_amount` columns to Order model with check constraints\n\n2. **`stockflow/schemas.py`**: Added `subtotal_amount` and `tax_amount` fields to `OrderOut` schema\n\n3. **`stockflow/main.py`**: Updated `create_order` to write all three columns:\n   - `subtotal_amount` = tax-exclusive subtotal\n   - `tax_amount` = floor(subtotal * 0.10)\n   - `total_amount` = subtotal + tax (tax-inclusive)\n\n4. **`alembic/versions/0002_expand_tax_columns.py`**: New migration (migrate-expand)\n   - Adds `subtotal_amount` and `tax_amount` columns\n   - Backfills existing rows with `WHERE subtotal_amount IS NULL` (idempotent)\n   - Old `total_amount` column preserved for compatibility\n\n5. **`alembic/versions/0003_contract_tax_columns.py`**: New migration (migrate-contract)\n   - Drops old `total_amount` column\n   - Adds new `total_amount` with `server_default=subtotal_amount + tax_amount`\n\n6. **`Makefile`**: Added `migrate-expand` and `migrate-contract` targets\n\n7. **`MIGRATION.md`**: Documents all migration decisions\n\n### Key Design Points:\n- `make migrate-expand` is safe during old app operation (old `total_amount` preserved)\n- `make migrate-contract` must be run after old app is stopped\n- Backfill uses `WHERE column IS NULL` to prevent double-counting on re-run\n- API does not accept amount specifications from requests\n- `tax_amount = floor(subtotal_amount * 0.10)` as specified",
+    "turns": 16,
+    "last_prompt_tokens": 29788,
+    "prompt_tokens": 255834,
+    "completion_tokens": 10425,
+    "duration_seconds": 598.843
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 0,
+  "code_health_score": 100.0
+}

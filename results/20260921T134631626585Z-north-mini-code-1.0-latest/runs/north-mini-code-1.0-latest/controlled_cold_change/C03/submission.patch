@@ -1,0 +1,80 @@
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..6aae598 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -164,6 +164,41 @@ def get_order(
+ ) -> Order:
+     return load_order(session, tenant, order_id)
+ 
++@app.post("/orders/{order_id}/confirm", response_model=OrderOut)
++def confirm_order(
++    order_id: uuid.UUID,
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> Order:
++    try:
++        order = load_order(session, tenant, order_id, lock=True)
++        if order.status != "PENDING":
++            raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be confirmed")
++        order.status = "CONFIRMED"
++        session.commit()
++    except ApiError:
++        session.rollback()
++        raise
++    session.expire_all()
++    return load_order(session, tenant, order_id)
++
++@app.post("/orders/{order_id}/ship", response_model=OrderOut)
++def ship_order(
++    order_id: uuid.UUID,
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> Order:
++    try:
++        order = load_order(session, tenant, order_id, lock=True)
++        if order.status != "CONFIRMED":
++            raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be shipped")
++        order.status = "SHIPPED"
++        session.commit()
++    except ApiError:
++        session.rollback()
++        raise
++    session.expire_all()
++    return load_order(session, tenant, order_id)
+ 
+ @app.post("/orders/{order_id}/cancel", response_model=OrderOut)
+ def cancel_order(
+@@ -173,7 +208,32 @@ def cancel_order(
+ ) -> Order:
+     try:
+         order = load_order(session, tenant, order_id, lock=True)
+-        if order.status != "PENDING":
++        if order.status not in ("PENDING", "CONFIRMED"):
++            raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be canceled")
++        product_ids = sorted((item.product_id for item in order.items), key=str)
++        products = {
++            product.id: product
++            for product in session.scalars(
++                select(Product).where(Product.id.in_(product_ids)).order_by(Product.id).with_for_update()
++            )
++        }
++        for item in order.items:
++            products[item.product_id].stock += item.quantity
++        order.status = "CANCELED"
++        session.commit()
++    except ApiError:
++        session.rollback()
++        raise
++    session.expire_all()
++    return load_order(session, tenant, order.id)
++def cancel_order(
++    order_id: uuid.UUID,
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> Order:
++    try:
++        order = load_order(session, tenant, order_id, lock=True)
++        if order.status not in ("PENDING", "CONFIRMED"):
+             raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be canceled")
+         product_ids = sorted((item.product_id for item in order.items), key=str)
+         products = {

@@ -1,0 +1,35 @@
+{
+  "model": "glm-4.7-flash:q4_K_M",
+  "track": "controlled_cold_change",
+  "task": "C02",
+  "started_at": "2026-09-22T11:34:27.218572+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.7,
+      "top_p": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 2400,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "Successfully implemented idempotency for POST /orders endpoint with the following features:\n\n1. **Idempotency-Key header**: Added required header parameter with ASCII validation (1-128 characters)\n2. **Scope-based deduplication**: Uses tenant_id + endpoint + key combination as scope\n3. **Idempotency checks**: \n   - Same key + same normalized request returns cached 201 response without re-deducting inventory\n   - Same key + different normalized request returns 409 IDEMPOTENCY_CONFLICT\n4. **Error handling**: Validation errors, inventory shortage, and rollback don't create idempotency records\n5. **Concurrency safety**: Uses database unique constraint and SELECT FOR UPDATE to ensure only one order and one inventory deduction per key\n6. **Tenant isolation**: Different tenants can use the same idempotency key\n7. **Schema compatibility**: Maintains existing OrderOut response schema\n\n**Changes made**:\n- Added `IdempotencyKey` model with `normalized_request` field\n- Created migration `0002_add_idempotency` for the new table\n- Updated `create_order` endpoint with idempotency logic\n- Added helper functions `normalize_request`, `idempotency_key`, and updated `tenant_id`\n\n**Checks run**:\n- syntax: pass (8 files)\n- compose-config: pass",
+    "turns": 27,
+    "last_prompt_tokens": 23989,
+    "prompt_tokens": 358822,
+    "completion_tokens": 10637,
+    "duration_seconds": 1698.188
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 9,
+  "code_health_score": 90.0
+}

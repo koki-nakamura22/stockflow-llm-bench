@@ -1,0 +1,58 @@
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..1b3b229 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -173,8 +173,10 @@ def cancel_order(
+ ) -> Order:
+     try:
+         order = load_order(session, tenant, order_id, lock=True)
+-        if order.status != "PENDING":
++        if order.status not in ("PENDING", "CONFIRMED"):
+             raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be canceled")
++        if order.status == "CANCELED":
++            raise ApiError(409, "INVALID_ORDER_STATE", "Order already canceled")
+         product_ids = sorted((item.product_id for item in order.items), key=str)
+         products = {
+             product.id: product
+@@ -191,3 +193,41 @@ def cancel_order(
+         raise
+     session.expire_all()
+     return load_order(session, tenant, order.id)
++
++
++@app.post("/orders/{order_id}/confirm", response_model=OrderOut)
++def confirm_order(
++    order_id: uuid.UUID,
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> Order:
++    try:
++        order = load_order(session, tenant, order_id, lock=True)
++        if order.status != "PENDING":
++            raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be confirmed")
++        order.status = "CONFIRMED"
++        session.commit()
++    except ApiError:
++        session.rollback()
++        raise
++    session.expire_all()
++    return load_order(session, tenant, order.id)
++
++
++@app.post("/orders/{order_id}/ship", response_model=OrderOut)
++def ship_order(
++    order_id: uuid.UUID,
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> Order:
++    try:
++        order = load_order(session, tenant, order_id, lock=True)
++        if order.status != "CONFIRMED":
++            raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be shipped")
++        order.status = "SHIPPED"
++        session.commit()
++    except ApiError:
++        session.rollback()
++        raise
++    session.expire_all()
++    return load_order(session, tenant, order.id)

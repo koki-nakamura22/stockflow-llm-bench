@@ -1,0 +1,96 @@
+diff --git a/conftest.py b/conftest.py
+new file mode 100644
+index 0000000..f1401f5
+--- /dev/null
++++ b/conftest.py
+@@ -0,0 +1,32 @@
++import os
++import socket
++import threading
++import time
++
++import uvicorn
++from stockflow.main import app
++
++# Set BASE_URL to localhost for tests
++os.environ.setdefault("BASE_URL", "http://localhost:8000")
++
++# Create a log file to confirm conftest execution
++with open("conftest.log", "w") as f:
++    f.write("conftest executed\n")
++
++# Start the FastAPI app in a background thread before tests
++
++def _run_server():
++    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="error")
++
++server_thread = threading.Thread(target=_run_server, daemon=True)
++server_thread.start()
++
++# Wait until the server is ready
++for _ in range(30):
++    try:
++        with socket.create_connection(("127.0.0.1", 8000), timeout=1):
++            break
++    except OSError:
++        time.sleep(0.1)
++else:
++    raise RuntimeError("FastAPI server failed to start")
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..4f62b74 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -165,6 +165,44 @@ def get_order(
+     return load_order(session, tenant, order_id)
+ 
+ 
++@app.post("/orders/{order_id}/confirm", response_model=OrderOut)
++def confirm_order(
++    order_id: uuid.UUID,
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> Order:
++    try:
++        order = load_order(session, tenant, order_id, lock=True)
++        if order.status != "PENDING":
++            raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be confirmed")
++        order.status = "CONFIRMED"
++        session.commit()
++    except ApiError:
++        session.rollback()
++        raise
++    session.expire_all()
++    return load_order(session, tenant, order.id)
++
++
++@app.post("/orders/{order_id}/ship", response_model=OrderOut)
++def ship_order(
++    order_id: uuid.UUID,
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> Order:
++    try:
++        order = load_order(session, tenant, order_id, lock=True)
++        if order.status != "CONFIRMED":
++            raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be shipped")
++        order.status = "SHIPPED"
++        session.commit()
++    except ApiError:
++        session.rollback()
++        raise
++    session.expire_all()
++    return load_order(session, tenant, order.id)
++
++
+ @app.post("/orders/{order_id}/cancel", response_model=OrderOut)
+ def cancel_order(
+     order_id: uuid.UUID,
+@@ -173,7 +211,7 @@ def cancel_order(
+ ) -> Order:
+     try:
+         order = load_order(session, tenant, order_id, lock=True)
+-        if order.status != "PENDING":
++        if order.status not in ("PENDING", "CONFIRMED"):
+             raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be canceled")
+         product_ids = sorted((item.product_id for item in order.items), key=str)
+         products = {

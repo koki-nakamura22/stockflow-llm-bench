@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# ---------------------------------------------------------------------------
+# 採点の内訳は公開しない。理由は README の「Public 版について」を参照。
+# ---------------------------------------------------------------------------
+test-output.log
+evaluator-result.json
+evaluator-console.log
+pytest.xml

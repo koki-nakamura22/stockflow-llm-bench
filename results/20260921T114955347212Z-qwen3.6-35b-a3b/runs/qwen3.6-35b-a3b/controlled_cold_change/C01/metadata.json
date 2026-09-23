@@ -1,0 +1,39 @@
+{
+  "model": "qwen3.6:35b-a3b",
+  "track": "controlled_cold_change",
+  "task": "C01",
+  "started_at": "2026-09-21T12:13:25.501598+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repeat_penalty": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "Implemented `GET /orders` endpoint with cursor pagination:\n\n**Changes made:**\n1. **stockflow/schemas.py**: Added `OrdersList` response schema with `items: list[OrderOut]` and `next_cursor: str | None`\n\n2. **stockflow/main.py**:\n   - Added imports for `hmac`, `os`, `datetime`, `Query`, and base64 functions\n   - Added `CURSOR_SECRET` environment variable reading\n   - Added `_encode_cursor(created_at, order_id)`: Creates HMAC-signed cursor with format `base64(timestamp|order_id|hmac)`\n   - Added `_decode_cursor(cursor)`: Validates HMAC signature and extracts timestamp/order_id, raises `INVALID_CURSOR` on tampering\n   - Added `_cursor_filter_params()`: Generates stable string for cursor compatibility validation\n   - Added `GET /orders` endpoint with:\n     - `limit` (required, 1-100)\n     - Optional `status`, `created_from`, `created_to`, `cursor` query params\n     - Order by `created_at DESC, id DESC`\n     - Tenant boundary enforcement via `tenant_id` header\n     - Cursor compatibility check (returns 400 INVALID_CURSOR if filters changed)\n     - Uses `(created_at, id)` tuple comparison to prevent duplicates/gaps\n     - Returns `{\"items\": [...], \"next_cursor\": \"string or null\"}`\n\n**Checks run:**\n- `syntax`: pass\n- `compose-config`: pass\n- `public-tests`: connection refused (expected - no running server in isolated environment)",
+    "turns": 19,
+    "last_prompt_tokens": 19219,
+    "prompt_tokens": 191683,
+    "completion_tokens": 5822,
+    "duration_seconds": 313.109
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 45,
+  "code_health_score": 100.0
+}

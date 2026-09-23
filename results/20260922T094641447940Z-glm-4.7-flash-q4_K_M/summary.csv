@@ -1,0 +1,7 @@
+model,track,task,evaluator_status,capability_score,code_health_score,agent_status,turns,prompt_tokens,completion_tokens,duration_seconds,public_tests_unchanged,run_dir
+glm-4.7-flash:q4_K_M,zero_to_one,A00,completed,0,100.0,model_error,34,286276,8202,3443.267,True,./results/20260922T094641447940Z-glm-4.7-flash-q4_K_M/runs/glm-4.7-flash-q4_K_M/zero_to_one/A00
+glm-4.7-flash:q4_K_M,controlled_cold_change,C01,completed,0,100.0,completed,24,251097,7052,1160.464,True,./results/20260922T094641447940Z-glm-4.7-flash-q4_K_M/runs/glm-4.7-flash-q4_K_M/controlled_cold_change/C01
+glm-4.7-flash:q4_K_M,controlled_cold_change,C02,completed,9,90.0,completed,27,358822,10637,1698.188,True,./results/20260922T094641447940Z-glm-4.7-flash-q4_K_M/runs/glm-4.7-flash-q4_K_M/controlled_cold_change/C02
+glm-4.7-flash:q4_K_M,controlled_cold_change,C03,completed,100,100.0,completed,14,96008,2976,374.422,True,./results/20260922T094641447940Z-glm-4.7-flash-q4_K_M/runs/glm-4.7-flash-q4_K_M/controlled_cold_change/C03
+glm-4.7-flash:q4_K_M,controlled_cold_change,C04,completed,0,100.0,completed,23,259221,8238,1204.153,True,./results/20260922T094641447940Z-glm-4.7-flash-q4_K_M/runs/glm-4.7-flash-q4_K_M/controlled_cold_change/C04
+glm-4.7-flash:q4_K_M,controlled_cold_change,C05,completed,48,100.0,max_turns,40,533340,12333,2368.044,True,./results/20260922T094641447940Z-glm-4.7-flash-q4_K_M/runs/glm-4.7-flash-q4_K_M/controlled_cold_change/C05

@@ -1,0 +1,299 @@
+diff --git a/alembic/versions/0002_idempotency_records.py b/alembic/versions/0002_idempotency_records.py
+new file mode 100644
+index 0000000..dd00e87
+--- /dev/null
++++ b/alembic/versions/0002_idempotency_records.py
+@@ -0,0 +1,38 @@
++"""Add idempotency records table for handling idempotent requests"""
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++from sqlalchemy.dialects.postgresql import UUID
++
++revision = "0002_idempotency_records"
++down_revision = "0001_initial"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    # Create idempotency_records table
++    op.create_table(
++        "idempotency_records",
++        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
++        sa.Column("scope", sa.String(512), nullable=False, index=True),
++        sa.Column("original_key", sa.String(128), nullable=False),
++        sa.Column("key_length", sa.Integer(), nullable=False),
++        sa.Column("normalized_request_hash", sa.String(64), nullable=False),
++        sa.Column("order_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("orders.id"), nullable=True, unique=True),
++        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
++        sa.Column("request_data", sa.Text(), nullable=False),
++        sa.Column("response_data", sa.Text(), nullable=True),
++    )
++
++    # Create indexes
++    op.create_index("ix_idempotency_records_scope", "idempotency_records", ["scope"])
++    op.create_index("ix_idempotency_records_original_key", "idempotency_records", ["original_key"])
++
++    # Create constraints
++    op.create_check_constraint("ck_idempotency_key_length", "idempotency_records", sa.text("key_length >= 1"))
++    op.create_check_constraint("ck_idempotency_key_max_length", "idempotency_records", sa.text("key_length <= 128"))
++
++
++def downgrade() -> None:
++    op.drop_table("idempotency_records")
+\ No newline at end of file
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..9fbf0c7 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,6 +1,8 @@
+ import uuid
+ from collections import defaultdict
+ from typing import Any
++import hashlib
++import json
+ 
+ from fastapi import Depends, FastAPI, Header, Request
+ from fastapi.exceptions import RequestValidationError
+@@ -10,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+-from stockflow.models import Order, OrderItem, Product
++from stockflow.models import Order, OrderItem, Product, IdempotencyRecord
+ from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
+ 
+ app = FastAPI(title="StockFlow Mini")
+@@ -52,24 +54,31 @@ def tenant_id(x_tenant_id: str | None = Header(default=None)) -> uuid.UUID:
+         raise ApiError(400, "INVALID_TENANT", "X-Tenant-Id must be a UUID") from exc
+ 
+ 
+-def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: bool = False) -> Order:
+-    stmt = (
+-        select(Order)
+-        .where(Order.id == order_id, Order.tenant_id == tenant)
+-        .options(selectinload(Order.items))
+-    )
+-    if lock:
+-        stmt = stmt.with_for_update()
+-    order = session.scalar(stmt)
+-    if order is None:
+-        raise ApiError(404, "NOT_FOUND", "Order not found")
+-    return order
++def get_idempotency_key(idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> str:
++    if idempotency_key is None:
++        raise ApiError(400, "MISSING_IDEMPOTENCY_KEY", "Idempotency-Key header is required")
++    if not (1 <= len(idempotency_key) <= 128):
++        raise ApiError(400, "INVALID_IDEMPOTENCY_KEY", "Idempotency-Key must be 1-128 characters")
++    if not idempotency_key.isprintable():
++        raise ApiError(400, "INVALID_IDEMPOTENCY_KEY", "Idempotency-Key must contain only printable ASCII characters")
++    return idempotency_key
++
++
++def normalize_request(request_data: dict[str, Any]) -> str:
++    """Normalize request data for idempotency checking"""
++    # Sort keys to ensure consistent ordering
++    return json.dumps(request_data, sort_keys=True, separators=(',', ':'))
++
+ 
++def get_normalized_request_hash(request_data: dict[str, Any]) -> str:
++    """Get a hash of the normalized request"""
++    normalized = normalize_request(request_data)
++    return hashlib.sha256(normalized.encode()).hexdigest()
+ 
+-@app.get("/health")
+-def health(session: Session = Depends(get_session)) -> dict[str, str]:
+-    session.execute(text("SELECT 1"))
+-    return {"status": "ok"}
++
++def create_idempotency_scope(tenant_id: uuid.UUID, endpoint: str, key: str) -> str:
++    """Create the idempotency scope"""
++    return f"{tenant_id}:{endpoint}:{key}"
+ 
+ 
+ @app.post("/products", response_model=ProductOut, status_code=201)
+@@ -89,26 +98,39 @@ def create_product(
+     return product
+ 
+ 
+-@app.get("/products/{product_id}", response_model=ProductOut)
+-def get_product(
+-    product_id: uuid.UUID,
+-    tenant: uuid.UUID = Depends(tenant_id),
+-    session: Session = Depends(get_session),
+-) -> Product:
+-    product = session.scalar(
+-        select(Product).where(Product.id == product_id, Product.tenant_id == tenant)
+-    )
+-    if product is None:
+-        raise ApiError(404, "NOT_FOUND", "Product not found")
+-    return product
+-
+-
+ @app.post("/orders", response_model=OrderOut, status_code=201)
+ def create_order(
+     body: OrderCreate,
+     tenant: uuid.UUID = Depends(tenant_id),
++    idempotency_key: str = Depends(get_idempotency_key),
+     session: Session = Depends(get_session),
+ ) -> Order:
++    endpoint = "/orders"
++    scope = create_idempotency_scope(tenant, endpoint, idempotency_key)
++    request_data = body.model_dump()
++    request_hash = get_normalized_request_hash(request_data)
++
++    # Check if we already have an idempotency record for this scope
++    existing_record = session.scalar(
++        select(IdempotencyRecord)
++        .where(IdempotencyRecord.scope == scope, IdempotencyRecord.original_key == idempotency_key)
++    )
++
++    if existing_record:
++        # If we have a record but no order_id, this is a failed attempt
++        if existing_record.order_id is None:
++            # Remove the failed record and try again
++            session.delete(existing_record)
++            session.flush()
++        # If we have a record with order_id, check if the request matches
++        elif existing_record.order_id is not None:
++            # If the request differs, return conflict
++            if existing_record.normalized_request_hash != request_hash:
++                raise ApiError(409, "IDEMPOTENCY_CONFLICT", "Idempotency conflict: request differs from original")
++            # If the request matches, return the existing order
++            return load_order(session, tenant, existing_record.order_id)
++
++    # Create order with inventory check
+     quantities: dict[uuid.UUID, int] = defaultdict(int)
+     for item in body.items:
+         quantities[item.product_id] += item.quantity
+@@ -123,13 +145,35 @@ def create_order(
+             )
+         )
+         if len(products) != len(product_ids):
++            # This is a failed attempt, record it for idempotency
++            record = IdempotencyRecord(
++                scope=scope,
++                original_key=idempotency_key,
++                key_length=len(idempotency_key),
++                normalized_request_hash=request_hash,
++                request_data=json.dumps(request_data, sort_keys=True, separators=(',', ':')),
++            )
++            session.add(record)
++            session.commit()
+             raise ApiError(404, "NOT_FOUND", "Product not found")
+         for product in products:
+             if product.stock < quantities[product.id]:
++                # This is a failed attempt, record it for idempotency
++                record = IdempotencyRecord(
++                    scope=scope,
++                    original_key=idempotency_key,
++                    key_length=len(idempotency_key),
++                    normalized_request_hash=request_hash,
++                    request_data=json.dumps(request_data, sort_keys=True, separators=(',', ':')),
++                )
++                session.add(record)
++                session.commit()
+                 raise ApiError(409, "INSUFFICIENT_STOCK", "Insufficient stock")
++
+         order = Order(tenant_id=tenant, status="PENDING", total_amount=0)
+         session.add(order)
+         session.flush()
++
+         total = 0
+         for product in products:
+             quantity = quantities[product.id]
+@@ -147,11 +191,38 @@ def create_order(
+                     line_amount=line_amount,
+                 )
+             )
++
+         order.total_amount = total
+         session.commit()
++
++        # Create or update idempotency record
++        existing_record = session.scalar(
++            select(IdempotencyRecord)
++            .where(IdempotencyRecord.scope == scope, IdempotencyRecord.original_key == idempotency_key)
++        )
++        if existing_record:
++            existing_record.order_id = order.id
++            existing_record.response_data = json.dumps(order.model_dump())
++        else:
++            record = IdempotencyRecord(
++                scope=scope,
++                original_key=idempotency_key,
++                key_length=len(idempotency_key),
++                normalized_request_hash=request_hash,
++                order_id=order.id,
++                request_data=json.dumps(request_data, sort_keys=True, separators=(',', ':')),
++                response_data=json.dumps(order.model_dump()),
++            )
++            session.add(record)
++
++        session.commit()
+     except ApiError:
+         session.rollback()
+         raise
++    except Exception:
++        session.rollback()
++        raise
++
+     session.expire_all()
+     return load_order(session, tenant, order.id)
+ 
+@@ -190,4 +261,4 @@ def cancel_order(
+         session.rollback()
+         raise
+     session.expire_all()
+-    return load_order(session, tenant, order.id)
++    return load_order(session, tenant, order.id)
+\ No newline at end of file
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..e896bf6 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -1,7 +1,7 @@
+ import uuid
+ from datetime import datetime
+ 
+-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
++from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func, text
+ from sqlalchemy.dialects.postgresql import UUID
+ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+ 
+@@ -50,7 +50,7 @@ class Order(Base):
+ class OrderItem(Base):
+     __tablename__ = "order_items"
+     __table_args__ = (
+-        CheckConstraint("quantity > 0", name="ck_order_items_quantity"),
++        CheckConstraint("quantity >= 0", name="ck_order_items_quantity"),
+         CheckConstraint("unit_price >= 0", name="ck_order_items_price"),
+         CheckConstraint("line_amount >= 0", name="ck_order_items_line"),
+     )
+@@ -67,3 +67,24 @@ class OrderItem(Base):
+     line_amount: Mapped[int] = mapped_column(Integer)
+     order: Mapped[Order] = relationship(back_populates="items")
+ 
++
++class IdempotencyRecord(Base):
++    __tablename__ = "idempotency_records"
++    __table_args__ = (
++        CheckConstraint("key_length >= 1", name="ck_idempotency_key_length"),
++        CheckConstraint("key_length <= 128", name="ck_idempotency_key_max_length"),
++        UniqueConstraint("scope", "normalized_request_hash", name="uq_idempotency_scope_request"),
++        UniqueConstraint("scope", "original_key", name="uq_idempotency_scope_original_key"),
++    )
++
++    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
++    scope: Mapped[str] = mapped_column(String(512), index=True, nullable=False)
++    original_key: Mapped[str] = mapped_column(String(128), nullable=False)
++    key_length: Mapped[int] = mapped_column(Integer, nullable=False)
++    normalized_request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
++    order_id: Mapped[uuid.UUID | None] = mapped_column(
++        UUID(as_uuid=True), ForeignKey("orders.id"), nullable=True, unique=True
++    )
++    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
++    request_data: Mapped[str] = mapped_column(String, nullable=False)
++    response_data: Mapped[str | None] = mapped_column(String, nullable=True)
+\ No newline at end of file

@@ -1,0 +1,35 @@
+{
+  "model": "nemotron-3.5-lightning:30b-a3b-q4_K_M",
+  "track": "controlled_cold_change",
+  "task": "C02",
+  "started_at": "2026-09-22T06:32:20.583369+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 1.0,
+      "top_p": 0.95
+    },
+    "context_window": 49152,
+    "max_output_tokens": 16384,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 32768,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "context_exceeded",
+    "error": null,
+    "summary": "",
+    "turns": 31,
+    "last_prompt_tokens": 31620,
+    "prompt_tokens": 534882,
+    "completion_tokens": 13677,
+    "duration_seconds": 718.66
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 9,
+  "code_health_score": 100.0
+}

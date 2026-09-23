@@ -1,0 +1,320 @@
+{
+  "qwen3.8:27b-q4_K_M": {
+    "status": "ok",
+    "pull_s": 221,
+    "capabilities": [
+      "completion",
+      "vision",
+      "tools",
+      "thinking",
+      "Projector"
+    ],
+    "architecture": "qwen35",
+    "parameters": "27.3B",
+    "quantization": "Q4_K_M",
+    "context_length": "262144",
+    "llmfit_tps": 6.7,
+    "llmfit_ttft_ms": 863,
+    "ps_64k": "18 GB 100% GPU",
+    "load_s": 6.3,
+    "long_ctx_runs": [
+      {
+        "pp_tok": 4879,
+        "pp_tps": 126.4,
+        "tg_tok": 256,
+        "tg_tps": 5.8
+      },
+      {
+        "pp_tok": 4879,
+        "pp_tps": 105.8,
+        "tg_tok": 256,
+        "tg_tps": 5.3
+      }
+    ],
+    "pp_tps_64k": 104.8,
+    "tg_tps_64k": 4.6,
+    "probe_16384": {
+      "ps": "17 GB 100% GPU",
+      "pp_tps": 93.4,
+      "tg_tps": 4.4
+    }
+  },
+  "ornith:35b-q4_K_M": {
+    "status": "ok",
+    "pull_s": 257,
+    "capabilities": [
+      "completion",
+      "tools",
+      "thinking",
+      "Parameters"
+    ],
+    "architecture": "qwen35moe",
+    "parameters": "34.7B",
+    "quantization": "Q4_K_M",
+    "context_length": "262144",
+    "llmfit_tps": 30.4,
+    "llmfit_ttft_ms": 399,
+    "ps_64k": "22 GB 100% GPU",
+    "load_s": 1.5,
+    "long_ctx_runs": [
+      {
+        "pp_tok": 4937,
+        "pp_tps": 662.8,
+        "tg_tok": 256,
+        "tg_tps": 40.1
+      },
+      {
+        "pp_tok": 4937,
+        "pp_tps": 5088.3,
+        "tg_tok": 256,
+        "tg_tps": 39.8
+      }
+    ],
+    "pp_tps_64k": 662.8,
+    "tg_tps_64k": 40.0
+  },
+  "muse-glimmer:30b-q4_K_M": {
+    "status": "ok",
+    "pull_s": 215,
+    "capabilities": [
+      "completion",
+      "vision",
+      "tools",
+      "thinking",
+      "Projector"
+    ],
+    "architecture": "muse-glimmer",
+    "parameters": "27.9B",
+    "quantization": "Q4_K_M",
+    "context_length": "131072",
+    "llmfit_tps": 5.2,
+    "llmfit_ttft_ms": 1419,
+    "ps_64k": "17 GB 100% GPU",
+    "load_s": 2.1,
+    "long_ctx_runs": [
+      {
+        "pp_tok": 4644,
+        "pp_tps": 82.4,
+        "tg_tok": 256,
+        "tg_tps": 5.0
+      },
+      {
+        "pp_tok": 4644,
+        "pp_tps": 8529.4,
+        "tg_tok": 256,
+        "tg_tps": 4.9
+      }
+    ],
+    "pp_tps_64k": 79.6,
+    "tg_tps_64k": 4.7
+  },
+  "laguna-xs-2.1:q4_K_M": {
+    "status": "ok",
+    "pull_s": 278,
+    "capabilities": [
+      "completion",
+      "tools",
+      "thinking",
+      "License"
+    ],
+    "architecture": "laguna",
+    "parameters": "33.4B",
+    "quantization": "Q4_K_M",
+    "context_length": "262144",
+    "llmfit_tps": 36.4,
+    "llmfit_ttft_ms": 336,
+    "ps_64k": "20 GB 100% GPU",
+    "load_s": 1.1,
+    "long_ctx_runs": [
+      {
+        "pp_tok": 4842,
+        "pp_tps": 571.3,
+        "tg_tok": 256,
+        "tg_tps": 46.7
+      },
+      {
+        "pp_tok": 4842,
+        "pp_tps": 33729.0,
+        "tg_tok": 256,
+        "tg_tps": 46.3
+      }
+    ],
+    "pp_tps_64k": 571.3,
+    "tg_tps_64k": 46.5
+  },
+  "devstral-small-2:24b-instruct-2512-q4_K_M": {
+    "status": "ok",
+    "pull_s": 217,
+    "capabilities": [
+      "completion",
+      "vision",
+      "tools",
+      "Parameters"
+    ],
+    "architecture": "mistral3",
+    "parameters": "24.0B",
+    "quantization": "Q4_K_M",
+    "context_length": "393216",
+    "llmfit_tps": 5.7,
+    "llmfit_ttft_ms": 991,
+    "ps_64k": "20 GB 100% GPU",
+    "load_s": 5.3,
+    "long_ctx_runs": [
+      {
+        "pp_tok": 5473,
+        "pp_tps": 115.0,
+        "tg_tok": 256,
+        "tg_tps": 5.6
+      },
+      {
+        "pp_tok": 5473,
+        "pp_tps": 14310.4,
+        "tg_tok": 256,
+        "tg_tps": 5.8
+      }
+    ],
+    "pp_tps_64k": 115.0,
+    "tg_tps_64k": 5.7
+  },
+  "glm-4.7-flash:q4_K_M": {
+    "status": "ok",
+    "pull_s": 279,
+    "capabilities": [
+      "completion",
+      "tools",
+      "thinking",
+      "Parameters"
+    ],
+    "architecture": "glm4moelite",
+    "parameters": "29.9B",
+    "quantization": "Q4_K_M",
+    "context_length": "202752",
+    "llmfit_tps": 25.4,
+    "llmfit_ttft_ms": 317,
+    "ps_64k": "20 GB 100% GPU",
+    "load_s": 5.0,
+    "long_ctx_runs": [
+      {
+        "pp_tok": 4599,
+        "pp_tps": 248.8,
+        "tg_tok": 256,
+        "tg_tps": 20.4
+      },
+      {
+        "pp_tok": 4599,
+        "pp_tps": 28188.8,
+        "tg_tok": 256,
+        "tg_tps": 20.9
+      }
+    ],
+    "pp_tps_64k": 248.8,
+    "tg_tps_64k": 20.6
+  },
+  "gemma4:26b-a4b-it-q4_K_M": {
+    "status": "ok",
+    "pull_s": 277,
+    "capabilities": [
+      "completion",
+      "vision",
+      "tools",
+      "thinking",
+      "Parameters"
+    ],
+    "architecture": "gemma4",
+    "parameters": "25.8B",
+    "quantization": "Q4_K_M",
+    "context_length": "262144",
+    "llmfit_tps": 26.0,
+    "llmfit_ttft_ms": 386,
+    "ps_64k": "17 GB 100% GPU",
+    "load_s": 2.1,
+    "long_ctx_runs": [
+      {
+        "pp_tok": 5606,
+        "pp_tps": 553.4,
+        "tg_tok": 256,
+        "tg_tps": 34.9
+      },
+      {
+        "pp_tok": 5606,
+        "pp_tps": 37377.6,
+        "tg_tok": 256,
+        "tg_tps": 34.5
+      }
+    ],
+    "pp_tps_64k": 553.4,
+    "tg_tps_64k": 34.7
+  },
+  "nemotron-3.5-lightning:30b-a3b-q4_K_M": {
+    "status": "ok",
+    "pull_s": 328,
+    "capabilities": [
+      "completion",
+      "tools",
+      "thinking",
+      "Parameters"
+    ],
+    "architecture": "nemotron_h_moe",
+    "parameters": "32.9B",
+    "quantization": "Q4_K_M",
+    "context_length": "1048576",
+    "llmfit_tps": 28.3,
+    "llmfit_ttft_ms": 454,
+    "ps_64k": "26 GB 3%/97% CPU/GPU",
+    "load_s": 8.6,
+    "long_ctx_runs": [
+      {
+        "pp_tok": 4934,
+        "pp_tps": 591.0,
+        "tg_tok": 256,
+        "tg_tps": 31.8
+      },
+      {
+        "pp_tok": 4934,
+        "pp_tps": 4562.2,
+        "tg_tok": 256,
+        "tg_tps": 31.3
+      }
+    ],
+    "pp_tps_64k": 591.0,
+    "tg_tps_64k": 31.6,
+    "probe_49152": {
+      "ps": "25 GB 100% GPU",
+      "pp_tps": 382.9,
+      "tg_tps": 24.5
+    }
+  },
+  "qwen3-coder:30b-a3b-q4_K_M": {
+    "status": "ok",
+    "pull_s": 267,
+    "capabilities": [
+      "completion",
+      "tools",
+      "Parameters"
+    ],
+    "architecture": "qwen3moe",
+    "parameters": "30.5B",
+    "quantization": "Q4_K_M",
+    "context_length": "262144",
+    "llmfit_tps": 40.2,
+    "llmfit_ttft_ms": 240,
+    "ps_64k": "21 GB 100% GPU",
+    "load_s": 1.4,
+    "long_ctx_runs": [
+      {
+        "pp_tok": 4681,
+        "pp_tps": 458.8,
+        "tg_tok": 256,
+        "tg_tps": 36.9
+      },
+      {
+        "pp_tok": 4681,
+        "pp_tps": 30980.7,
+        "tg_tok": 256,
+        "tg_tps": 36.5
+      }
+    ],
+    "pp_tps_64k": 458.8,
+    "tg_tps_64k": 36.7
+  }
+}

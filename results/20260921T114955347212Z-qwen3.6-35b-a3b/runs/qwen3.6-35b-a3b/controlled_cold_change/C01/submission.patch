@@ -1,0 +1,157 @@
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..4fc2b74 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,8 +1,12 @@
++import hmac
++import os
+ import uuid
++from base64 import urlsafe_b64decode, urlsafe_b64encode
+ from collections import defaultdict
++from datetime import datetime
+ from typing import Any
+ 
+-from fastapi import Depends, FastAPI, Header, Request
++from fastapi import Depends, FastAPI, Header, Query, Request
+ from fastapi.exceptions import RequestValidationError
+ from fastapi.responses import JSONResponse
+ from sqlalchemy import select, text
+@@ -11,7 +15,9 @@ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+ from stockflow.models import Order, OrderItem, Product
+-from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
++from stockflow.schemas import OrderCreate, OrderOut, OrdersList, ProductCreate, ProductOut
++
++CURSOR_SECRET = os.environ.get("CURSOR_SECRET", "")
+ 
+ app = FastAPI(title="StockFlow Mini")
+ 
+@@ -191,3 +197,114 @@ def cancel_order(
+         raise
+     session.expire_all()
+     return load_order(session, tenant, order.id)
++
++
++# ---------------------------------------------------------------------------
++# Cursor helpers
++# ---------------------------------------------------------------------------
++
++def _encode_cursor(created_at: datetime, order_id: uuid.UUID) -> str:
++    """Encode a cursor value: <created_at>|<order_id> signed with HMAC."""
++    payload = f"{int(created_at.timestamp())}|{order_id}"
++    sig = hmac.new(
++        CURSOR_SECRET.encode(),
++        payload.encode(),
++        "sha256",
++    ).hexdigest()
++    return urlsafe_b64encode(f"{payload}|{sig}".encode()).decode()
++
++
++def _decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
++    """Decode a cursor value and return (created_at, order_id).
++
++    Raises ApiError on tampering or invalid format.
++    """
++    raw = urlsafe_b64decode(cursor.encode())
++    parts = raw.split(b"|")
++    if len(parts) != 3:
++        raise ApiError(400, "INVALID_CURSOR", "Cursor has wrong format")
++    payload, sig = parts[0], parts[1]
++    expected_sig = hmac.new(
++        CURSOR_SECRET.encode(),
++        payload,
++        "sha256",
++    ).hexdigest().encode()
++    if not hmac.compare_digest(sig, expected_sig):
++        raise ApiError(400, "INVALID_CURSOR", "Cursor signature mismatch")
++    ts_str, order_id_str = payload.split(b"|")
++    ts = int(ts_str)
++    return datetime.fromtimestamp(ts), uuid.UUID(order_id_str)
++
++
++def _cursor_filter_params(
++    status: str | None = None,
++    created_from: datetime | None = None,
++    created_to: datetime | None = None,
++    cursor: str | None = None,
++) -> str:
++    """Return a stable string to verify cursor compatibility."""
++    return f"{status}|{created_from}|{created_to}"
++
++
++# ---------------------------------------------------------------------------
++# GET /orders
++# ---------------------------------------------------------------------------
++
++@app.get("/orders", response_model=OrdersList)
++def list_orders(
++    limit: int = Query(ge=1, le=100),
++    status: str | None = Query(default=None),
++    created_from: datetime | None = Query(default=None),
++    created_to: datetime | None = Query(default=None),
++    cursor: str | None = Query(default=None),
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> OrdersList:
++    # Build cursor filter string for validation
++    cursor_filter = _cursor_filter_params(status, created_from, created_to)
++
++    # Decode cursor if provided
++    cursor_created_at: datetime | None = None
++    cursor_order_id: uuid.UUID | None = None
++    if cursor is not None:
++        cursor_created_at, cursor_order_id = _decode_cursor(cursor)
++
++    # Build the query
++    stmt = (
++        select(Order)
++        .where(Order.tenant_id == tenant)
++        .options(selectinload(Order.items))
++    )
++
++    # Apply filters
++    if status is not None:
++        stmt = stmt.where(Order.status == status)
++    if created_from is not None:
++        stmt = stmt.where(Order.created_at >= created_from)
++    if created_to is not None:
++        stmt = stmt.where(Order.created_at <= created_to)
++
++    # Apply cursor (items after the cursor position, i.e., strictly less than
++    # the cursor's (created_at, id) pair in DESC order)
++    if cursor_created_at is not None and cursor_order_id is not None:
++        # Validate filter compatibility
++        if _cursor_filter_params(status, created_from, created_to) != cursor_filter:
++            raise ApiError(400, "INVALID_CURSOR", "Cursor incompatible with current filters")
++        stmt = stmt.where(
++            (Order.created_at, Order.id) < (cursor_created_at, cursor_order_id)
++        )
++
++    # Limit to limit+1 to detect if there is a next page
++    stmt = stmt.order_by(Order.created_at.desc(), Order.id.desc()).limit(limit + 1)
++    orders: list[Order] = list(session.scalars(stmt).unique().all())
++
++    # Determine next_cursor
++    next_cursor: str | None = None
++    if len(orders) > limit:
++        next_item = orders.pop()
++        next_cursor = _encode_cursor(next_item.created_at, next_item.id)
++
++    return OrdersList(
++        items=[OrderOut.model_validate(o) for o in orders],
++        next_cursor=next_cursor,
++    )
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..a428aea 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -50,3 +50,8 @@ class OrderOut(BaseModel):
+     updated_at: datetime
+     items: list[OrderItemOut]
+ 
++
++class OrdersList(BaseModel):
++    items: list[OrderOut]
++    next_cursor: str | None = None
++

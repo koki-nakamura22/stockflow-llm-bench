@@ -1,0 +1,276 @@
+diff --git a/alembic/versions/0002_add_outbox_events.py b/alembic/versions/0002_add_outbox_events.py
+new file mode 100644
+index 0000000..0dfec16
+--- /dev/null
++++ b/alembic/versions/0002_add_outbox_events.py
+@@ -0,0 +1,29 @@
++"""add outbox_events table"""
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++
++revision = "0002_add_outbox_events"
++down_revision = "0001_initial"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.create_table(
++         "outbox_events",
++        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
++        sa.Column("event_id", postgresql.UUID(as_uuid=True), nullable=False, unique=True),
++        sa.Column("event_type", sa.String(64), nullable=False),
++        sa.Column("aggregate_id", postgresql.UUID(as_uuid=True), nullable=False),
++        sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
++        sa.Column("payload", postgresql.JSON, nullable=False),
++        sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
++        sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
++        sa.Column("last_error", sa.String(500), nullable=True),
++        sa.CheckConstraint("attempts >= 0", name="ck_outbox_events_attempts"),
++     )
++
++
++def downgrade() -> None:
++    op.drop_table("outbox_events")
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..3f1a210 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+-from stockflow.models import Order, OrderItem, Product
++from stockflow.models import Order, OrderItem, OutboxEvent, Product
+ from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
+ 
+ app = FastAPI(title="StockFlow Mini")
+@@ -32,7 +32,7 @@ def error_body(code: str, message: str, details: dict[str, Any] | None = None) -
+ def api_error_handler(_request: Request, exc: ApiError) -> JSONResponse:
+     return JSONResponse(
+         status_code=exc.status, content=error_body(exc.code, exc.message, exc.details)
+-    )
++     )
+ 
+ 
+ @app.exception_handler(RequestValidationError)
+@@ -40,7 +40,7 @@ def validation_error_handler(_request: Request, exc: RequestValidationError) ->
+     return JSONResponse(
+         status_code=422,
+         content=error_body("VALIDATION_ERROR", "Invalid request", {"errors": exc.errors()}),
+-    )
++     )
+ 
+ 
+ def tenant_id(x_tenant_id: str | None = Header(default=None)) -> uuid.UUID:
+@@ -55,9 +55,9 @@ def tenant_id(x_tenant_id: str | None = Header(default=None)) -> uuid.UUID:
+ def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: bool = False) -> Order:
+     stmt = (
+         select(Order)
+-        .where(Order.id == order_id, Order.tenant_id == tenant)
+-        .options(selectinload(Order.items))
+-    )
++         .where(Order.id == order_id, Order.tenant_id == tenant)
++         .options(selectinload(Order.items))
++     )
+     if lock:
+         stmt = stmt.with_for_update()
+     order = session.scalar(stmt)
+@@ -97,7 +97,7 @@ def get_product(
+ ) -> Product:
+     product = session.scalar(
+         select(Product).where(Product.id == product_id, Product.tenant_id == tenant)
+-    )
++     )
+     if product is None:
+         raise ApiError(404, "NOT_FOUND", "Product not found")
+     return product
+@@ -117,9 +117,9 @@ def create_order(
+         products = list(
+             session.scalars(
+                 select(Product)
+-                .where(Product.id.in_(product_ids), Product.tenant_id == tenant)
+-                .order_by(Product.id)
+-                .with_for_update()
++                 .where(Product.id.in_(product_ids), Product.tenant_id == tenant)
++                 .order_by(Product.id)
++                 .with_for_update()
+             )
+         )
+         if len(products) != len(product_ids):
+@@ -145,9 +145,21 @@ def create_order(
+                     unit_price=product.unit_price,
+                     quantity=quantity,
+                     line_amount=line_amount,
+-                )
++                 )
+             )
+         order.total_amount = total
++        session.add(
++            OutboxEvent(
++                event_id=uuid.uuid4(),
++                event_type="order.created",
++                aggregate_id=order.id,
++                payload={
++                    "order_id": str(order.id),
++                    "tenant_id": str(tenant),
++                    "total_amount": total,
++                },
++            )
++        )
+         session.commit()
+     except ApiError:
+         session.rollback()
+@@ -185,6 +197,17 @@ def cancel_order(
+         for item in order.items:
+             products[item.product_id].stock += item.quantity
+         order.status = "CANCELED"
++        session.add(
++            OutboxEvent(
++                event_id=uuid.uuid4(),
++                event_type="order.canceled",
++                aggregate_id=order.id,
++                payload={
++                    "order_id": str(order.id),
++                    "tenant_id": str(tenant),
++                },
++            )
++        )
+         session.commit()
+     except ApiError:
+         session.rollback()
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..9714080 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -2,7 +2,7 @@ import uuid
+ from datetime import datetime
+ 
+ from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+-from sqlalchemy.dialects.postgresql import UUID
++from sqlalchemy.dialects.postgresql import JSON, UUID
+ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+ 
+ 
+@@ -67,3 +67,19 @@ class OrderItem(Base):
+     line_amount: Mapped[int] = mapped_column(Integer)
+     order: Mapped[Order] = relationship(back_populates="items")
+ 
++
++class OutboxEvent(Base):
++    __tablename__ = "outbox_events"
++    __table_args__ = (
++        CheckConstraint("attempts >= 0", name="ck_outbox_events_attempts"),
++    )
++
++    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
++    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True, nullable=False)
++    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
++    aggregate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
++    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
++    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
++    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
++    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
++    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+diff --git a/stockflow/outbox_worker.py b/stockflow/outbox_worker.py
+new file mode 100644
+index 0000000..808a3c2
+--- /dev/null
++++ b/stockflow/outbox_worker.py
+@@ -0,0 +1,95 @@
++"""Transactional outbox worker – publishes pending events via HTTP POST."""
++
++import argparse
++import logging
++import os
++import sys
++from datetime import datetime, timezone
++
++import httpx
++from sqlalchemy import select, update
++from sqlalchemy.orm import Session
++
++from stockflow.db import SessionLocal, engine
++from stockflow.models import OutboxEvent
++
++logger = logging.getLogger(__name__)
++
++
++PUBLISH_URL = os.environ.get("EVENT_PUBLISH_URL", "http://localhost:9999/events")
++
++
++def claim_one(session: Session) -> OutboxEvent | None:
++    """Atomically claim the oldest unsent event (SKIP LOCKED for concurrency safety)."""
++    stmt = (
++        select(OutboxEvent)
++        .where(OutboxEvent.sent_at.is_(None))
++        .order_by(OutboxEvent.id)
++        .limit(1)
++        .with_for_update(skip_locked=True)
++    )
++    event = session.scalar(stmt)
++    return event
++
++
++def publish(event: OutboxEvent) -> bool:
++    """POST the event payload to EVENT_PUBLISH_URL. Returns True on 2xx."""
++    headers = {"Idempotency-Key": str(event.event_id), "Content-Type": "application/json"}
++    payload = {
++        "event_id": str(event.event_id),
++        "event_type": event.event_type,
++        "aggregate_id": str(event.aggregate_id),
++        "occurred_at": event.occurred_at.isoformat(),
++        "payload": event.payload,
++    }
++    try:
++        resp = httpx.post(PUBLISH_URL, json=payload, headers=headers, timeout=10)
++        return resp.status_code >= 200 and resp.status_code < 300
++    except httpx.HTTPError as exc:
++        logger.error("publish failed: %s", exc)
++        return False
++
++
++def run_once() -> int:
++    """Claim and publish one event. Returns 1 if published, 0 if no events."""
++    session = SessionLocal()
++    try:
++        event = claim_one(session)
++        if event is None:
++            return 0
++        success = publish(event)
++        if success:
++            event.sent_at = datetime.now(timezone.utc)
++            session.commit()
++            logger.info("published event %s", event.event_id)
++            return 1
++        else:
++            event.attempts += 1
++            event.last_error = "HTTP request failed"
++            session.commit()
++            logger.warning("failed to publish event %s (attempts=%d)", event.event_id, event.attempts)
++            return 0
++    except Exception:
++        session.rollback()
++        raise
++    finally:
++        session.close()
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser(description="Outbox event publisher")
++    parser.add_argument("--once", action="store_true", help="Publish one event and exit")
++    args = parser.parse_args()
++
++    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
++
++    if args.once:
++        count = run_once()
++        sys.exit(0 if count else 1)
++    else:
++        logger.info("no --once flag; nothing to do")
++        sys.exit(0)
++
++
++if __name__ == "__main__":
++    main()

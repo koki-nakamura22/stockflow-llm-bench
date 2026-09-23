@@ -1,0 +1,36 @@
+{
+  "model": "ornith:35b-q4_K_M",
+  "track": "controlled_cold_change",
+  "task": "C05",
+  "started_at": "2026-09-22T03:28:15.166388+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "context_exceeded",
+    "error": null,
+    "summary": "",
+    "turns": 13,
+    "last_prompt_tokens": 38302,
+    "prompt_tokens": 318751,
+    "completion_tokens": 29722,
+    "duration_seconds": 1542.934
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "error",
+  "capability_score": 0,
+  "code_health_score": 100.0
+}

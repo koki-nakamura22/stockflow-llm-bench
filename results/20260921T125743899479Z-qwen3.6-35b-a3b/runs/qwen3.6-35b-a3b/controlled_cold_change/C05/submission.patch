@@ -1,0 +1,279 @@
+diff --git a/MIGRATION.md b/MIGRATION.md
+new file mode 100644
+index 0000000..abc803d
+--- /dev/null
++++ b/MIGRATION.md
+@@ -0,0 +1,40 @@
++# Rolling Migration: tax_amount expansion
++
++## 判断記録
++
++### 1. 移行戦略: expand/contract を別 revision・別 command に分ける
++
++`make migrate-expand` と `make migrate-contract` を別々の alembic revision として実装。
++旧 app が稼働中に expand を実行し、その後 contract を実行する。
++
++### 2. 旧物理 column `total_amount` の互換性
++
++expand 中は旧物理 column `total_amount` を維持し、意味は「税抜合計」のまま。
++新 column `subtotal_amount` に同じ値をコピーし、`tax_amount` = floor(subtotal_amount * 0.10) を計算。
++旧 app の read/write は一切壊さない。
++
++### 3. 既存行と旧 app の新規 write の新 column への反映
++
++- **既存行**: migrate-expand の backfill で `subtotal_amount` と `tax_amount` に反映
++- **旧 app の新規 write**: app code で `total_amount` と `subtotal_amount`/`tax_amount` の両方に書き込み
++- **migration 再実行**: backfill 時に `WHERE subtotal_amount IS NULL` で二重加算を防ぐ
++
++### 4. API request から金額指定を受けない
++
++`OrderCreate` schema に金額フィールドは含めず、サーバーサイドで計算のみ。
++
++### 5. 新 column 定義
++
++- `subtotal_amount`: 税抜合計 (既存 `total_amount` と同じ値)
++- `tax_amount`: floor(subtotal_amount * 0.10)
++- `total_amount`: subtotal_amount + tax_amount (税抜合計)
++
++### 6. contract 実行のタイミング
++
++旧 app の停止後に明示的に `make migrate-contract` を実行する。
++contract 後は旧 `total_amount` column を削除し、新 `total_amount` (税込) のみを使用。
++
++### 7. migration 再実行の安全性
++
++- expand: `WHERE subtotal_amount IS NULL` で既存行の二重更新を防ぐ
++- contract: 旧 column が存在しない場合は error となるが、既存行は新 column でカバーされている
+diff --git a/Makefile b/Makefile
+index c37318d..1be2faa 100755
+--- a/Makefile
++++ b/Makefile
+@@ -1,10 +1,13 @@
+-.PHONY: migrate test lint typecheck
++.PHONY: migrate migrate-expand migrate-contract test lint typecheck
+ migrate:
+ 	alembic upgrade head
++migrate-expand:
++	alembic upgrade 0002_expand_tax_columns
++migrate-contract:
++	alembic upgrade 0003_contract_tax_columns
+ test:
+ 	pytest -q
+ lint:
+ 	ruff check stockflow tests
+ typecheck:
+ 	mypy stockflow
+-
+diff --git a/alembic/versions/0002_expand_tax_columns.py b/alembic/versions/0002_expand_tax_columns.py
+new file mode 100644
+index 0000000..fc7280e
+--- /dev/null
++++ b/alembic/versions/0002_expand_tax_columns.py
+@@ -0,0 +1,54 @@
++"""expand: add subtotal_amount and tax_amount columns
++
++During compatibility:
++- Old column `total_amount` remains (still tax-exclusive/subtotal)
++- New columns `subtotal_amount` and `tax_amount` are added
++- All three columns are populated on new writes
++"""
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++
++revision = "0002_expand_tax_columns"
++down_revision = "0001_initial"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    # Add new columns (nullable to allow backfill)
++    op.add_column("orders", sa.Column("subtotal_amount", sa.Integer(), nullable=True))
++    op.add_column("orders", sa.Column("tax_amount", sa.Integer(), nullable=True))
++
++    # Backfill existing rows
++    # subtotal_amount = old total_amount (tax-exclusive)
++    # tax_amount = floor(subtotal_amount * 0.10)
++    op.execute(
++        """
++        UPDATE orders
++        SET subtotal_amount = total_amount,
++            tax_amount = FLOOR(total_amount * 0.10)
++        WHERE subtotal_amount IS NULL
++        """
++    )
++
++    # Make columns non-nullable after backfill
++    op.alter_column("orders", "subtotal_amount", existing_type=sa.Integer(), nullable=False)
++    op.alter_column("orders", "tax_amount", existing_type=sa.Integer(), nullable=False)
++
++    # Add new check constraints
++    op.create_check_constraint(
++        "ck_orders_subtotal", "orders", "subtotal_amount >= 0"
++    )
++    op.create_check_constraint(
++        "ck_orders_tax", "orders", "tax_amount >= 0"
++    )
++
++
++def downgrade() -> None:
++    op.drop_constraint("ck_orders_tax", "orders", type_="check")
++    op.drop_constraint("ck_orders_subtotal", "orders", type_="check")
++    op.alter_column("orders", "tax_amount", existing_type=sa.Integer(), nullable=True)
++    op.alter_column("orders", "subtotal_amount", existing_type=sa.Integer(), nullable=True)
++    op.drop_column("orders", "tax_amount")
++    op.drop_column("orders", "subtotal_amount")
+diff --git a/alembic/versions/0003_contract_tax_columns.py b/alembic/versions/0003_contract_tax_columns.py
+new file mode 100644
+index 0000000..1778513
+--- /dev/null
++++ b/alembic/versions/0003_contract_tax_columns.py
+@@ -0,0 +1,60 @@
++"""contract: replace total_amount with tax-inclusive version
++
++After old app is stopped:
++- Old `total_amount` column (tax-exclusive) is dropped
++- New `total_amount` column = subtotal_amount + tax_amount (tax-inclusive)
++- Only new columns are written by the app
++"""
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++
++revision = "0003_contract_tax_columns"
++down_revision = "0002_expand_tax_columns"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    # Drop old check constraint on total_amount
++    op.drop_constraint("ck_orders_total", "orders", type_="check")
++
++    # Drop old total_amount column (tax-exclusive)
++    op.drop_column("orders", "total_amount")
++
++    # Add new total_amount column (tax-inclusive) with computed default
++    op.add_column(
++        "orders",
++        sa.Column(
++            "total_amount",
++            sa.Integer(),
++            server_default=sa.text("subtotal_amount + tax_amount"),
++            nullable=False,
++        ),
++    )
++
++    # Backfill existing rows where total_amount is NULL
++    op.execute(
++        """
++        UPDATE orders
++        SET total_amount = subtotal_amount + tax_amount
++        WHERE total_amount IS NULL
++        """
++    )
++
++    # Add new check constraint
++    op.create_check_constraint(
++        "ck_orders_total", "orders", "total_amount >= 0"
++    )
++
++
++def downgrade() -> None:
++    op.drop_constraint("ck_orders_total", "orders", type_="check")
++    op.drop_column("orders", "total_amount")
++    op.add_column(
++        "orders",
++        sa.Column("total_amount", sa.Integer(), nullable=False),
++    )
++    op.create_check_constraint(
++        "ck_orders_total", "orders", "total_amount >= 0"
++    )
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..c2f38f9 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -5,7 +5,7 @@ from typing import Any
+ from fastapi import Depends, FastAPI, Header, Request
+ from fastapi.exceptions import RequestValidationError
+ from fastapi.responses import JSONResponse
+-from sqlalchemy import select, text
++from sqlalchemy import floor, select, text
+ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.orm import Session, selectinload
+ 
+@@ -127,15 +127,15 @@ def create_order(
+         for product in products:
+             if product.stock < quantities[product.id]:
+                 raise ApiError(409, "INSUFFICIENT_STOCK", "Insufficient stock")
+-        order = Order(tenant_id=tenant, status="PENDING", total_amount=0)
++        order = Order(tenant_id=tenant, status="PENDING", subtotal_amount=0, tax_amount=0, total_amount=0)
+         session.add(order)
+         session.flush()
+-        total = 0
++        subtotal = 0
+         for product in products:
+             quantity = quantities[product.id]
+             product.stock -= quantity
+             line_amount = product.unit_price * quantity
+-            total += line_amount
++            subtotal += line_amount
+             session.add(
+                 OrderItem(
+                     order_id=order.id,
+@@ -147,7 +147,10 @@ def create_order(
+                     line_amount=line_amount,
+                 )
+             )
+-        order.total_amount = total
++        tax_amount = int(floor(subtotal * 0.10))
++        order.subtotal_amount = subtotal
++        order.tax_amount = tax_amount
++        order.total_amount = subtotal + tax_amount
+         session.commit()
+     except ApiError:
+         session.rollback()
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..ba4ec91 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -32,11 +32,17 @@ class Product(Base):
+ 
+ class Order(Base):
+     __tablename__ = "orders"
+-    __table_args__ = (CheckConstraint("total_amount >= 0", name="ck_orders_total"),)
++    __table_args__ = (
++        CheckConstraint("subtotal_amount >= 0", name="ck_orders_subtotal"),
++        CheckConstraint("tax_amount >= 0", name="ck_orders_tax"),
++        CheckConstraint("total_amount >= 0", name="ck_orders_total"),
++    )
+ 
+     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+     status: Mapped[str] = mapped_column(String(20), default="PENDING")
++    subtotal_amount: Mapped[int] = mapped_column(Integer)
++    tax_amount: Mapped[int] = mapped_column(Integer)
+     total_amount: Mapped[int] = mapped_column(Integer)
+     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+     updated_at: Mapped[datetime] = mapped_column(
+@@ -66,4 +72,3 @@ class OrderItem(Base):
+     quantity: Mapped[int] = mapped_column(Integer)
+     line_amount: Mapped[int] = mapped_column(Integer)
+     order: Mapped[Order] = relationship(back_populates="items")
+-
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..095aef8 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -45,8 +45,9 @@ class OrderOut(BaseModel):
+     id: uuid.UUID
+     tenant_id: uuid.UUID
+     status: str
++    subtotal_amount: int
++    tax_amount: int
+     total_amount: int
+     created_at: datetime
+     updated_at: datetime
+     items: list[OrderItemOut]
+-

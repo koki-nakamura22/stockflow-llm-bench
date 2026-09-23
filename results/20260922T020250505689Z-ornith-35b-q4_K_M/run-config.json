@@ -1,0 +1,17 @@
+{
+  "model": "ornith:35b-q4_K_M",
+  "adapter": "ollama",
+  "think": "on",
+  "sampling": {
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "top_k": 20
+  },
+  "context_window": 65536,
+  "max_output_tokens": 24576,
+  "request_timeout_seconds": 1200,
+  "context_guard_tokens": 40960,
+  "max_no_tool_turns": 3,
+  "max_repeated_calls": 8,
+  "max_turns": 40
+}

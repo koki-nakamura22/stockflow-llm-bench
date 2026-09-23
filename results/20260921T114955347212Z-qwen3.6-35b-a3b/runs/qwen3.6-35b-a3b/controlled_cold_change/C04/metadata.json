@@ -1,0 +1,39 @@
+{
+  "model": "qwen3.6:35b-a3b",
+  "track": "controlled_cold_change",
+  "task": "C04",
+  "started_at": "2026-09-21T12:32:01.194391+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repeat_penalty": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "Implemented transactional outbox pattern for order creation and cancellation:\n\n1. **OutboxEvent model** (`stockflow/models.py`): Added `OutboxEvent` table with fields: `id`, `event_type`, `aggregate_id`, `payload`, `attempts`, `last_error`, `sent_at`, `created_at`.\n\n2. **Alembic migration** (`alembic/versions/0002_outbox.py`): Created migration to add the `outbox_events` table.\n\n3. **Transactional integration** (`stockflow/main.py`): \n   - `create_order` inserts `OutboxEvent` with `event_type=\"order.created\"` in the same transaction as order creation\n   - `cancel_order` inserts `OutboxEvent` with `event_type=\"order.canceled\"` in the same transaction as order cancellation\n   - On rollback, no event is persisted\n\n4. **Outbox worker** (`stockflow/outbox_worker.py`):\n   - Runnable via `python -m stockflow.outbox_worker --once`\n   - Uses `SELECT ... FOR UPDATE SKIP LOCKED` to prevent multiple workers from claiming the same event\n   - POSTs JSON payload (`event_id`, `event_type`, `aggregate_id`, `occurred_at`, `payload`) to `EVENT_PUBLISH_URL` with `Idempotency-Key` header set to event_id\n   - On 2xx: sets `sent_at`\n   - On failure: increments `attempts` and sets `last_error`, event remains unsent for retry\n   - At-least-once delivery supported",
+    "turns": 24,
+    "last_prompt_tokens": 21973,
+    "prompt_tokens": 302436,
+    "completion_tokens": 6968,
+    "duration_seconds": 404.885
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 100,
+  "code_health_score": 100.0
+}

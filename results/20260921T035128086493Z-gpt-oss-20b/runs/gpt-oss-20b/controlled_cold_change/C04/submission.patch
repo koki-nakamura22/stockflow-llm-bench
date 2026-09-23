@@ -1,0 +1,223 @@
+diff --git a/alembic/versions/0002_outbox.py b/alembic/versions/0002_outbox.py
+new file mode 100644
+index 0000000..f9186e6
+--- /dev/null
++++ b/alembic/versions/0002_outbox.py
+@@ -0,0 +1,32 @@
++"""Add outbox table"""
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++
++revision = "0002_outbox"
++down_revision = "0001_initial"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.create_table(
++        "outbox",
++        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, default=sa.text("gen_random_uuid()")),
++        sa.Column("event_id", postgresql.UUID(as_uuid=True), unique=True, nullable=False),
++        sa.Column("event_type", sa.String(50), nullable=False),
++        sa.Column("aggregate_id", postgresql.UUID(as_uuid=True), nullable=False),
++        sa.Column("occurred_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
++        sa.Column("payload", postgresql.JSONB, nullable=False),
++        sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
++        sa.Column("attempts", sa.Integer, default=0, nullable=False),
++        sa.Column("last_error", sa.String, nullable=True),
++    )
++    op.create_index("ix_outbox_sent_at", "outbox", ["sent_at"])
++
++
++def downgrade() -> None:
++    op.drop_index("ix_outbox_sent_at", table_name="outbox")
++    op.drop_table("outbox")
++
++*** End of File
+\ No newline at end of file
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..7a2994c 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+-from stockflow.models import Order, OrderItem, Product
++from stockflow.models import Order, OrderItem, Product, Outbox
+ from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
+ 
+ app = FastAPI(title="StockFlow Mini")
+@@ -148,6 +148,14 @@ def create_order(
+                 )
+             )
+         order.total_amount = total
++        # Insert outbox event for order creation
++        outbox = Outbox(
++            event_id=uuid.uuid4(),
++            event_type="order.created",
++            aggregate_id=order.id,
++            payload={"order_id": str(order.id), "status": order.status, "total_amount": order.total_amount},
++        )
++        session.add(outbox)
+         session.commit()
+     except ApiError:
+         session.rollback()
+@@ -185,9 +193,25 @@ def cancel_order(
+         for item in order.items:
+             products[item.product_id].stock += item.quantity
+         order.status = "CANCELED"
++        # Insert outbox event for order cancellation
++        outbox = Outbox(
++            event_id=uuid.uuid4(),
++            event_type="order.canceled",
++            aggregate_id=order.id,
++            payload={"order_id": str(order.id), "status": order.status},
++        )
++        session.add(outbox)
+         session.commit()
+     except ApiError:
+         session.rollback()
+         raise
+     session.expire_all()
+     return load_order(session, tenant, order.id)
++
++
++if __name__ == "__main__":
++    import uvicorn
++
++    uvicorn.run(app, host="0.0.0.0", port=8000)
++
++*** End of File
+\ No newline at end of file
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..93a3d61 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -1,8 +1,8 @@
+ import uuid
+ from datetime import datetime
+ 
+-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+-from sqlalchemy.dialects.postgresql import UUID
++from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func, Index
++from sqlalchemy.dialects.postgresql import UUID, JSONB
+ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+ 
+ 
+@@ -67,3 +67,22 @@ class OrderItem(Base):
+     line_amount: Mapped[int] = mapped_column(Integer)
+     order: Mapped[Order] = relationship(back_populates="items")
+ 
++
++# Outbox table for transactional outbox pattern
++class Outbox(Base):
++    __tablename__ = "outbox"
++    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
++    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True, nullable=False)
++    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
++    aggregate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
++    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
++    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
++    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
++    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
++    last_error: Mapped[str | None] = mapped_column(String, nullable=True)
++
++    __table_args__ = (
++        Index("ix_outbox_sent_at", "sent_at"),
++    )
++
++*** End of File
+\ No newline at end of file
+diff --git a/stockflow/outbox_worker.py b/stockflow/outbox_worker.py
+new file mode 100644
+index 0000000..2a417a7
+--- /dev/null
++++ b/stockflow/outbox_worker.py
+@@ -0,0 +1,83 @@
++import os
++import sys
++import time
++from datetime import datetime
++from typing import List
++
++import httpx
++from sqlalchemy import select, update
++from sqlalchemy.exc import SQLAlchemyError
++
++from stockflow.db import get_session
++from stockflow.models import Outbox
++
++EVENT_PUBLISH_URL = os.getenv("EVENT_PUBLISH_URL")
++if not EVENT_PUBLISH_URL:
++    raise RuntimeError("EVENT_PUBLISH_URL environment variable not set")
++
++BATCH_SIZE = 10
++MAX_ATTEMPTS = 5
++
++
++def process_events(session, events: List[Outbox]):
++    for event in events:
++        try:
++            response = httpx.post(
++                EVENT_PUBLISH_URL,
++                json=event.payload,
++                headers={"Idempotency-Key": str(event.event_id)},
++                timeout=10,
++            )
++            if 200 <= response.status_code < 300:
++                event.sent_at = datetime.utcnow()
++                event.attempts = 0
++                event.last_error = None
++            else:
++                event.attempts += 1
++                event.last_error = f"{response.status_code} {response.text}"
++        except Exception as exc:
++            event.attempts += 1
++            event.last_error = str(exc)
++    session.commit()
++
++
++def claim_events(session) -> List[Outbox]:
++    stmt = (
++        select(Outbox)
++        .where(Outbox.sent_at.is_(None), Outbox.attempts < MAX_ATTEMPTS)
++        .order_by(Outbox.occurred_at)
++        .limit(BATCH_SIZE)
++        .with_for_update(skip_locked=True)
++    )
++    return session.scalars(stmt).all()
++
++
++def worker_once():
++    with get_session() as session:
++        events = claim_events(session)
++        if events:
++            process_events(session, events)
++
++
++def worker_loop():
++    while True:
++        with get_session() as session:
++            events = claim_events(session)
++            if not events:
++                time.sleep(1)
++                continue
++            process_events(session, events)
++
++
++if __name__ == "__main__":
++    import argparse
++
++    parser = argparse.ArgumentParser(description="Outbox worker")
++    parser.add_argument("--once", action="store_true", help="Process a single batch and exit")
++    args = parser.parse_args()
++    if args.once:
++        worker_once()
++    else:
++        worker_loop()
++
++*** End of File
+\ No newline at end of file

@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "runs": [
+    {
+      "model": "gpt-oss:20b",
+      "track": "zero_to_one",
+      "task": "A00",
+      "started_at": "2026-09-21T02:53:18.344405+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "medium",
+        "context_window": 32768,
+        "context_guard_tokens": 30000,
+        "max_no_tool_turns": 3,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "context_exceeded",
+        "error": null,
+        "summary": "",
+        "turns": 33,
+        "last_prompt_tokens": 26796,
+        "prompt_tokens": 375671,
+        "completion_tokens": 21142,
+        "duration_seconds": 1199.51
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "error",
+      "capability_score": 0,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260921T023315706640Z-gpt-oss-20b/runs/gpt-oss-20b/zero_to_one/A00/workspace",
+      "run_dir": "./results/20260921T023315706640Z-gpt-oss-20b/runs/gpt-oss-20b/zero_to_one/A00"
+    }
+  ]
+}

@@ -1,0 +1,672 @@
+diff --git a/alembic/__init__.py b/alembic/__init__.py
+new file mode 100644
+index 0000000..62c3e18
+--- /dev/null
++++ b/alembic/__init__.py
+@@ -0,0 +1 @@
++# Alembic package placeholder
+\ No newline at end of file
+diff --git a/alembic/env.py b/alembic/env.py
+new file mode 100644
+index 0000000..64d9e53
+--- /dev/null
++++ b/alembic/env.py
+@@ -0,0 +1,54 @@
++from logging.config import fileConfig
++
++from sqlalchemy import engine_from_config
++from sqlalchemy import pool
++
++from alembic import context
++
++# Import your models here
++from stockflow.models import Base
++
++config = context.config
++
++# Setup logger
++if config.config_file_name is not None:
++    fileConfig(config.config_file_name)
++
++# target_metadata for autogenerate
++
++target_metadata = Base.metadata
++
++def run_migrations_offline():
++    url = config.get_main_option("sqlalchemy.url")
++    context.configure(
++        url=url,
++        target_metadata=target_metadata,
++        literal_binds=True,
++        dialect_opts={"paramstyle": "named"},
++    )
++
++    with context.begin_transaction():
++        context.run_migrations()
++
++
++def run_migrations_online():
++    connectable = engine_from_config(
++        config.get_section(config.config_ini_section),
++        prefix="sqlalchemy.",
++        poolclass=pool.NullPool,
++    )
++
++    with connectable.connect() as connection:
++        context.configure(
++            connection=connection,
++            target_metadata=target_metadata,
++        )
++
++        with context.begin_transaction():
++            context.run_migrations()
++
++
++if context.is_offline_mode():
++    run_migrations_offline()
++else:
++    run_migrations_online()
+\ No newline at end of file
+diff --git a/alembic/script.py.mako b/alembic/script.py.mako
+new file mode 100644
+index 0000000..c4151f7
+--- /dev/null
++++ b/alembic/script.py.mako
+@@ -0,0 +1,64 @@
++from logging.config import fileConfig
++
++from sqlalchemy import engine_from_config
++from sqlalchemy import pool
++
++from alembic import context
++
++# this is the Alembic Config object, which provides
++# access to the values within the .ini file in a Python object
++config = context.config
++
++# Interpret the config file for Python logging.
++# This line sets up loggers basically.
++if config.config_file_name is not None:
++    fileConfig(config.config_file_name)
++
++# add your model's MetaData object here
++# for 'autogenerate' support
++from stockflow.models import Base
++
++target_metadata = Base.metadata
++
++# other values from the config, defined by the needs of env.py,
++# can be grabbed here if a caller might support them
++
++# here we define what operations are supported by this script
++# Don't make these functions themselves database specific.
++
++from sqlalchemy import text
++
++def run_migrations_offline():
++    url = config.get_main_option("sqlalchemy.url")
++    context.configure(
++        url=url,
++        target_metadata=target_metadata,
++        literal_binds=True,
++        dialect_opts={"paramstyle": "named"},
++    )
++
++    with context.begin_transaction():
++        context.run_migrations()
++
++
++def run_migrations_online():
++    connectable = engine_from_config(
++        config.get_section(config.config_ini_section),
++        prefix="sqlalchemy.",
++        poolclass=pool.NullPool,
++    )
++
++    with connectable.connect() as connection:
++        context.configure(
++            connection=connection,
++            target_metadata=target_metadata,
++        )
++
++        with context.begin_transaction():
++            context.run_migrations()
++
++
++if context.is_offline_mode():
++    run_migrations_offline()
++else:
++    run_migrations_online()
+\ No newline at end of file
+diff --git a/alembic/versions/__init__.py b/alembic/versions/__init__.py
+new file mode 100644
+index 0000000..067fed2
+--- /dev/null
++++ b/alembic/versions/__init__.py
+@@ -0,0 +1 @@
++# empty placeholder for versions directory
+\ No newline at end of file
+diff --git a/stockflow/crud.py b/stockflow/crud.py
+new file mode 100644
+index 0000000..6d036a8
+--- /dev/null
++++ b/stockflow/crud.py
+@@ -0,0 +1,123 @@
++"""CRUD operations for StockFlow."""
++
++import uuid
++from datetime import datetime, timezone
++from typing import Optional, List
++
++from sqlalchemy import select, update, delete, exc
++from sqlalchemy.orm import Session
++from sqlalchemy.dialects.postgresql import insert
++
++from stockflow.models import Base, Product, Order, OrderItem
++
++# Helper to generate UUID
++
++def generate_uuid() -> uuid.UUID:
++    return uuid.uuid4()
++
++# Product CRUD
++
++def create_product(session: Session, tenant_id: uuid.UUID, sku: str, name: str, unit_price: int, stock: int) -> Product:
++    product = Product(
++        id=generate_uuid(),
++        tenant_id=tenant_id,
++        sku=sku,
++        name=name,
++        unit_price=unit_price,
++: int = stock,
++        created_at=datetime.now(timezone.utc),
++        updated_at=datetime.now(timezone.utc),
++    )
++    session.add(product)
++    session.flush()
++    return product
++
++
++def get_product_by_id(session: Session, product_id: uuid.UUID, tenant_id: uuid.UUID) -> Optional[Product]:
++    return session.scalar(
++        select(Product).where(Product.id == product_id, Product.tenant_id == tenant_id)
++    )
++
++
++def get_product_by_sku(session: Session, tenant_id: uuid.UUID, sku: str) -> Optional[Product]:
++    return session.scalar(
++        select(Product).where(Product.tenant_id == tenant_id, Product.sku == sku)
++    )
++
++
++def update_product_stock(session: Session, product_id: uuid.UUID, new_stock: int) -> None:
++    session.execute(
++        update(Product)
++        .where(Product.id == product_id)
++        .values(stock=new_stock, updated_at=datetime.now(timezone.utc))
++    )
++
++# Order CRUD
++
++def create_order(session: Session, tenant_id: uuid.UUID, total_amount: int) -> Order:
++    order = Order(
++        id=generate_uuid(),
++        tenant_id=tenant_id,
++        status="PENDING",
++        total_amount=total_amount,
++        created_at=datetime.now(timezone.utc),
++        updated_at=datetime.now(timezone.utc),
++    )
++    session.add(order)
++    session.flush()
++    return order
++
++
++def get_order_by_id(session: Session, order_id: uuid.UUID, tenant_id: uuid.UUID) -> Optional[Order]:
++    return session.scalar(
++        select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
++    )
++
++
++def update_order_status(session: Session, order_id: uuid.UUID, status: str) -> None:
++    session.execute(
++        update(Order)
++        .where(Order.id == order_id)
++        .values(status=status, updated_at=datetime.now(timezone.utc))
++    )
++
++
++def add_order_items(session: Session, order_id: uuid.UUID, items_data: List[dict]) -> None:
++    # items_data: list of dicts with keys product_id, sku, product_name, unit_price, quantity, line_amount
++    for data in items_data:
++        order_item = OrderItem(
++            id=generate_uuid(),
++            order_id=order_id,
++            product_id=data["product_id"],
++            sku=data["sku"],
++            product_name=data["product_name"],
++            unit_price=data["unit_price"],
++            quantity=data["quantity"],
++            line_amount=data["line_amount"],
++        )
++        session.add(order_item)
++
++
++def get_order_items_by_order(session: Session, order_id: uuid.UUID) -> List[OrderItem]:
++    return session.scalars(
++        select(OrderItem).where(OrderItem.order_id == order_id)
++    ).all()
++
++# Stock adjustment utilities
++
++def decrement_product_stock(session: Session, product_id: uuid.UUID, quantity: int) -> None:
++    session.execute(
++        update(Product)
++        .where(Product.id == product_id)
++        .values(stock=session.query(Product.stock).filter(Product.id == product_id).scalar_subquery() - quantity,
++                updated_at=datetime.now(timezone.utc))
++    )
++
++
++def increment_product_stock(session: Session, product_id: uuid.UUID, quantity: int) -> None:
++    session.execute(
++        update(Product)
++        .where(Product.id == product_id)
++        .values(stock=session.query(Product.stock).filter(Product.id == product_id).scalar_subquery() + quantity,
++                updated_at=datetime.now(timezone.utc))
++    )
+\ No newline at end of file
+diff --git a/stockflow/main.py b/stockflow/main.py
+index e9d1d7e..0e9f510 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,9 +1,240 @@
+-from fastapi import FastAPI
++import os
++import uuid
++from datetime import datetime, timezone
++
++from fastapi import FastAPI, Header, HTTPException, status, Depends
++from sqlalchemy import create_engine, select, text
++from sqlalchemy.orm import sessionmaker, Session
++
++from stockflow.models import Base, Product, Order, OrderItem
++from stockflow.schemas import (
++    ProductCreateRequest,
++    ProductResponse,
++    OrderCreateRequest,
++    OrderResponse,
++)
++from stockflow.crud import generate_uuid
++
++# Database setup
++DATABASE_URL = os.getenv("DATABASE_URL")
++if not DATABASE_URL:
++    raise RuntimeError("DATABASE_URL environment variable not set")
++
++engine = create_engine(DATABASE_URL)
++SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
++
++# Create tables if they don't exist (development convenience)
++Base.metadata.create_all(bind=engine)
++
++# Dependency to get a DB session per request
++
++def get_db():
++    db = SessionLocal()
++    try:
++        yield db
++        db.commit()
++    except Exception:
++        db.rollback()
++        raise
++    finally:
++        db.close()
++
++# Custom error response helper
++
++def http_error(code: str, message: str, status_code: int = 400, details=None):
++    if details is None:
++        details = {}
++    raise HTTPException(
++        status_code=status_code,
++        detail={"error": {"code": code, "message": message, "details": details}},
++    )
+ 
+ app = FastAPI(title="StockFlow Mini")
+ 
++# Helper: extract tenant ID from header and validate
++def extract_tenant_id(X_Tenant_Id: str = Header(..., description="Tenant UUID")):
++    try:
++        return uuid.UUID(X_Tenant_Id)
++    except ValueError:
++        http_error("INVALID_TENANT", "Invalid X-Tenant-Id header", status.HTTP_400_BAD_REQUEST)
+ 
+-@app.get("/health")
+-def health() -> dict[str, str]:
+-    return {"status": "not-implemented"}
++# Product endpoints
++
++@app.post("/products", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
++async def create_product(
++    request: ProductCreateRequest,
++    tenant_id: uuid.UUID = Depends(extract_tenant_id),
++    db: Session = Depends(get_db),
++):
++    # Check for duplicate SKU within tenant
++    stmt = select(Product).where(Product.tenant_id == tenant_id, Product.sku == request.sku)
++    existing = db.scalar(stmt)
++    if existing:
++        http_error("SKU_ALREADY_EXISTS", f"SKU '{request.sku}' already exists for this tenant", status.HTTP_409_CONFLICT)
++
++    # Create product
++    product = Product(
++        id=generate_uuid(),
++        tenant_id=tenant_id,
++        sku=request.sku,
++        name=request.name,
++        unit_price=request.unit_price,
++        stock=request.stock,
++        created_at=datetime.now(timezone.utc),
++        updated_at=datetime.now(timezone.utc),
++    )
++    db.add(product)
++    db.flush()
++    return ProductResponse.from_orm(product)
++
++@app.get("/products/{product_id}", response_model=ProductResponse)
++async def get_product(
++    product_id: uuid.UUID,
++    tenant_id: uuid.UUID = Depends(extract_tenant_id),
++    db: Session = Depends(get_db),
++):
++    stmt = select(Product).where(Product.id == product_id, Product.tenant_id == tenant_id)
++    product = db.scalar(stmt)
++    if not product:
++        http_error("NOT_FOUND", "Product not found", status.HTTP_404_NOT_FOUND)
++    return ProductResponse.from_orm(product)
++
++# Order endpoints
++
++@app.post("/orders", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
++async def create_order(
++    request: OrderCreateRequest,
++    tenant_id: uuid.UUID = Depends(extract_tenant_id),
++    db: Session = Depends(get_db),
++):
++    # Aggregate items by product_id
++    items_by_product = {}
++    for item in request.items:
++        items_by_product[item.product_id] = items_by_product.get(item.product_id, 0) + item.quantity
++
++    # Lock products belonging to tenant for update
++    product_ids = list(items_by_product.keys())
++    stmt = select(Product).where(Product.id.in_(product_ids), Product.tenant_id == tenant_id).with_for_update()
++    products = db.scalars(stmt).all()
++
++    product_map = {p.id: p for p in products}
+ 
++    # Validate all products exist and belong to tenant
++    for pid in product_ids:
++        if pid not in product_map:
++            http_error("NOT_FOUND", f"Product {pid} not found or does not belong to tenant", status.HTTP_404_NOT_FOUND)
++
++    # Validate stock
++    for pid, qty_needed in items_by_product.items():
++        prod = product_map[pid]
++        if prod.stock < qty_needed:
++            http_error("INSUFFICIENT_STOCK", f"Insufficient stock for product {pid}", status.HTTP_409_CONFLICT)
++
++    # Decrement stocks
++    for pid, qty_needed in items_by_product.items():
++        prod = product_map[pid]
++        prod.stock -= qty_needed
++        prod.updated_at = datetime.now(timezone.utc)
++        db.add(prod)
++
++    # Create order
++    order = Order(
++        id=generate_uuid(),
++        tenant_id=tenant_id,
++        status="PENDING",
++        total_amount=0,
++        created_at=datetime.now(timezone.utc),
++        updated_at=datetime.now(timezone.utc),
++    )
++    db.add(order)
++    db.flush()
++
++    # Create order items with snapshots
++    total_amount = 0
++    for pid, qty in items_by_product.items():
++        prod = product_map[pid]
++        line_amount = prod.unit_price * qty
++        total_amount += line_amount
++        order_item = OrderItem(
++            id=generate_uuid(),
++            order_id=order.id,
++            product_id=pid,
++            sku=prod.sku,
++            product_name=prod.name,
++            unit_price=prod.unit_price,
++            quantity=qty,
++            line_amount=line_amount,
++        )
++        db.add(order_item)
++
++    # Update order total_amount
++    order.total_amount = total_amount
++    order.updated_at = datetime.now(timezone.utc)
++    db.add(order)
++
++    # Reload order with items
++    db.refresh(order, attribute_names=["items"])
++    return OrderResponse.from_orm(order)
++
++@app.get("/orders/{order_id}", response_model=OrderResponse)
++async def get_order(
++    order_id: uuid.UUID,
++    tenant_id: uuid.UUID = Depends(extract_tenant_id),
++    db: Session = Depends(get_db),
++):
++    stmt = select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
++    order = db.scalar(stmt)
++    if not order:
++        http_error("NOT_FOUND", "Order not found", status.HTTP_404_NOT_FOUND)
++
++    # Load items if not already loaded
++    if not order.items:
++        stmt_items = select(OrderItem).where(OrderItem.order_id == order_id)
++        order.items = db.scalars(stmt_items).all()
++    return OrderResponse.from_orm(order)
++
++@app.post("/orders/{order_id}/cancel")
++async def cancel_order(
++    order_id: uuid.UUID,
++    tenant_id: uuid.UUID = Depends(extract_tenant_id),
++    db: Session = Depends(get_db),
++):
++    # Lock the order row
++    stmt = select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id).with_for_update()
++    order = db.scalar(stmt)
++    if not order:
++        http_error("NOT_FOUND", "Order not found", status.HTTP_404_NOT_FOUND)
++
++    if order.status != "PENDING":
++        http_error("INVALID_ORDER_STATE", "Only pending orders can be cancelled", status.HTTP_409_CONFLICT)
++
++    # Load order items
++    stmt_items = select(OrderItem).where(OrderItem.order_id == order_id)
++    items = db.scalars(stmt_items).all()
++
++    # Restore stock for each product (ensure tenant matches via product)
++    for item in items:
++        prod_stmt = select(Product).where(Product.id == item.product_id, Product.tenant_id == tenant_id).with_for_update()
++        prod = db.scalar(prod_stmt)
++        if prod:
++            prod.stock += item.quantity
++            prod.updated_at = datetime.now(timezone.utc)
++            db.add(prod)
++
++    # Update order status to cancelled
++    order.status = "CANCELLED"
++    order.updated_at = datetime.now(timezone.utc)
++    db.add(order)
++
++    return {"status": "cancelled"}
++
++@app.get("/health")
++def health(db: Session = Depends(get_db)):
++    # Simple DB ping
++    try:
++        db.execute(text("SELECT 1"))
++        return {"status": "ok"}
++    except Exception:
++        # According to spec, health endpoint returns 200 only if DB reachable.
++        # We'll treat DB error as internal error.
++        http_error("INTERNAL_ERROR", "Database connection failed", status.HTTP_503_SERVICE_UNAVAILABLE)
+\ No newline at end of file
+diff --git a/stockflow/models.py b/stockflow/models.py
+new file mode 100644
+index 0000000..4bee575
+--- /dev/null
++++ b/stockflow/models.py
+@@ -0,0 +1,60 @@
++"""SQLAlchemy models for StockFlow."""
++
++from datetime import datetime, timezone
++from typing import List
++
++from sqlalchemy import Column, DateTime, Integer, String, ForeignKey, UniqueConstraint
++from sqlalchemy.dialects.postgresql import UUID as PG_UUID
++from sqlalchemy.ext.declarative import declarative_base
++from sqlalchemy.orm import relationship
++
++Base = declarative_base()
++
++class Product(Base):
++    __tablename__ = "products"
++
++    id = Column(PG_UUID(as_uuid=True), primary_key=True)
++    tenant_id = Column(PG_UUID(as_uuid=True), nullable=False)
++    sku = Column(String, nullable=False)
++    name = Column(String, nullable=False)
++    unit_price = Column(Integer, nullable=False)
++    stock = Column(Integer, nullable=False)
++    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
++    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
++
++    __table_args__ = (
++        UniqueConstraint("tenant_id", "sku", name="uix_tenant_sku"),
++    )
++
++    # Relationship to orders (through order_items)
++    order_items = relationship("OrderItem", back_populates="product")
++
++
++class Order(Base):
++    __tablename__ = "orders"
++
++    id = Column(PG_UUID(as_uuid=True), primary_key=True)
++    tenant_id = Column(PG_UUID(as_uuid=True), nullable=False)
++    status = Column(String, nullable=False)  # e.g., "PENDING", "CANCELLED"
++    total_amount = Column(Integer, nullable=False)
++    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
++    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
++
++    # Relationship to order_items
++    items = relationship("OrderItem", back_populates="order")
++
++
++class OrderItem(Base):
++    __tablename__ = "order_items"
++
++    id = Column(PG_UUID(as_uuid=True), primary_key=True)
++    order_id = Column(PG_UUID(as_uuid=True), ForeignKey("orders.id"), nullable=False)
++    product_id = Column(PG_UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
++    sku = Column(String, nullable=False)  # snapshot
++    product_name = Column(String, nullable=False)  # snapshot
++    unit_price = Column(Integer, nullable=False)  # snapshot
++    quantity = Column(Integer, nullable=False)
++    line_amount = Column(Integer, nullable=False)  # unit_price * quantity
++
++    order = relationship("Order", back_populates="items")
++    product = relationship("Product", back_populates="order_items")
+\ No newline at end of file
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+new file mode 100644
+index 0000000..33a59eb
+--- /dev/null
++++ b/stockflow/schemas.py
+@@ -0,0 +1,70 @@
++"""Pydantic schemas for StockFlow API."""
++
++from datetime import datetime
++from typing import List, Optional
++from uuid import UUID
++
++from pydantic import BaseModel, Field
++
++# Request schemas
++
++class ProductCreateRequest(BaseModel):
++    sku: str = Field(..., description="Stock Keeping Unit")
++    name: str = Field(..., description="Product name")
++    unit_price: int = Field(..., ge=0, description="Unit price in yen")
++    stock: int = Field(..., ge=0, description="Available stock")
++
++class OrderItemRequest(BaseModel):
++    product_id: UUID = Field(..., description="Product ID")
++    quantity: int = Field(..., gt=0, description="Quantity requested")
++
++class OrderCreateRequest(BaseModel):
++    items: List[OrderItemRequest] = Field(..., description="List of order items")
++
++# Response schemas
++
++class ProductResponse(BaseModel):
++    id: UUID
++    tenant_id: UUID
++    sku: str
++    name: str
++    unit_price: int
++    stock: int
++    created_at: datetime
++    updated_at: datetime
++
++    class Config:
++        from_attributes = True
++
++class OrderItemResponse(BaseModel):
++    id: UUID
++    order_id: UUID
++    product_id: UUID
++    sku: str
++
++    product_name: str
++    unit_price: int
++    quantity: int
++    line_amount: int
++
++    class Config:
++        from_attributes = True
++
++class OrderResponse(BaseModel):
++    id: UUID
++    tenant_id: UUID
++    status: str
++    total_amount: int
++    created_at: datetime
++    updated_at: datetime
++    items: List[OrderItemResponse]
++
++    class Config:
++        from_attributes = True
++
++# Error response schema (internal usage)
++
++class ErrorDetail(BaseModel):
++    code: str
++    message: str
++    details: dict = {}
+\ No newline at end of file

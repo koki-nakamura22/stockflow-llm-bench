@@ -1,0 +1,282 @@
+diff --git a/alembic/versions/0002_outbox.py b/alembic/versions/0002_outbox.py
+new file mode 100644
+index 0000000..c84fbb8
+--- /dev/null
++++ b/alembic/versions/0002_outbox.py
+@@ -0,0 +1,35 @@
++"""outbox table"""
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++
++revision = "0002_outbox"
++down_revision = "0001_initial"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.create_table(
++        "outbox",
++        sa.Column("event_id", postgresql.UUID(as_uuid=True), primary_key=True),
++        sa.Column("event_type", sa.String(50), nullable=False),
++        sa.Column("aggregate_id", postgresql.UUID(as_uuid=True), nullable=False),
++        sa.Column("occurred_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
++        sa.Column("payload", postgresql.JSONB, nullable=False),
++        sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
++        sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
++        sa.Column("last_error", sa.String(500), nullable=True),
++        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
++        sa.UniqueConstraint("event_id", name="uq_outbox_event_id"),
++        sa.CheckConstraint("attempts >= 0", name="ck_outbox_attempts"),
++        sa.CheckConstraint("attempts <= 100", name="ck_outbox_attempts_max"),
++    )
++    op.create_index("ix_outbox_aggregate_id", "outbox", ["aggregate_id"])
++    op.create_index("ix_outbox_sent_at", "outbox", ["sent_at"])
++
++
++def downgrade() -> None:
++    op.drop_index("ix_outbox_sent_at", table_name="outbox")
++    op.drop_index("ix_outbox_aggregate_id", table_name="outbox")
++    op.drop_table("outbox")
+\ No newline at end of file
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..74ed892 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,5 +1,6 @@
+ import uuid
+ from collections import defaultdict
++from datetime import datetime, timezone
+ from typing import Any
+ 
+ from fastapi import Depends, FastAPI, Header, Request
+@@ -10,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+-from stockflow.models import Order, OrderItem, Product
++from stockflow.models import Order, OrderItem, Outbox, Product
+ from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
+ 
+ app = FastAPI(title="StockFlow Mini")
+@@ -103,6 +104,21 @@ def get_product(
+     return product
+ 
+ 
++def create_outbox_event(
++    session: Session, event_type: str, aggregate_id: uuid.UUID, payload: dict[str, Any]
++) -> Outbox:
++    """Create an outbox event in the same transaction."""
++    outbox = Outbox(
++        event_id=uuid.uuid4(),
++        event_type=event_type,
++        aggregate_id=aggregate_id,
++        occurred_at=datetime.now(timezone.utc),
++        payload=payload,
++    )
++    session.add(outbox)
++    return outbox
++
++
+ @app.post("/orders", response_model=OrderOut, status_code=201)
+ def create_order(
+     body: OrderCreate,
+@@ -136,18 +152,27 @@ def create_order(
+             product.stock -= quantity
+             line_amount = product.unit_price * quantity
+             total += line_amount
+-            session.add(
+-                OrderItem(
+-                    order_id=order.id,
+-                    product_id=product.id,
+-                    sku=product.sku,
+-                    product_name=product.name,
+-                    unit_price=product.unit_price,
+-                    quantity=quantity,
+-                    line_amount=line_amount,
+-                )
++            order_item = OrderItem(
++                order_id=order.id,
++                product_id=product.id,
++                sku=product.sku,
++                product_name=product.name,
++                unit_price=product.unit_price,
++                quantity=quantity,
++                line_amount=line_amount,
+             )
++            session.add(order_item)
+         order.total_amount = total
++
++        # Create outbox event for order.created
++        payload = {
++            "order_id": str(order.id),
++            "tenant_id": str(tenant),
++            "status": "PENDING",
++            "total_amount": total,
++        }
++        create_outbox_event(session, "order.created", order.id, payload)
++
+         session.commit()
+     except ApiError:
+         session.rollback()
+@@ -185,9 +210,18 @@ def cancel_order(
+         for item in order.items:
+             products[item.product_id].stock += item.quantity
+         order.status = "CANCELED"
++
++        # Create outbox event for order.canceled
++        payload = {
++            "order_id": str(order.id),
++            "tenant_id": str(tenant),
++            "status": "CANCELED",
++        }
++        create_outbox_event(session, "order.canceled", order.id, payload)
++
+         session.commit()
+     except ApiError:
+         session.rollback()
+         raise
+     session.expire_all()
+-    return load_order(session, tenant, order.id)
++    return load_order(session, tenant, order.id)
+\ No newline at end of file
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..2a61bea 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -2,7 +2,7 @@ import uuid
+ from datetime import datetime
+ 
+ from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+-from sqlalchemy.dialects.postgresql import UUID
++from sqlalchemy.dialects.postgresql import UUID, JSONB
+ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+ 
+ 
+@@ -10,6 +10,25 @@ class Base(DeclarativeBase):
+     pass
+ 
+ 
++class Outbox(Base):
++    __tablename__ = "outbox"
++    __table_args__ = (
++        UniqueConstraint("event_id", name="uq_outbox_event_id"),
++        CheckConstraint("attempts >= 0", name="ck_outbox_attempts"),
++        CheckConstraint("attempts <= 100", name="ck_outbox_attempts_max"),
++    )
++
++    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
++    event_type: Mapped[str] = mapped_column(String(50))
++    aggregate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
++    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
++    payload: Mapped[dict] = mapped_column(JSONB)
++    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
++    attempts: Mapped[int] = mapped_column(Integer, default=0)
++    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
++    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
++
++
+ class Product(Base):
+     __tablename__ = "products"
+     __table_args__ = (
+diff --git a/stockflow/outbox_worker.py b/stockflow/outbox_worker.py
+new file mode 100644
+index 0000000..88ace53
+--- /dev/null
++++ b/stockflow/outbox_worker.py
+@@ -0,0 +1,93 @@
++"""Outbox worker for processing and publishing events."""
++import argparse
++import os
++import sys
++from datetime import datetime, timezone
++
++import httpx
++from sqlalchemy import select
++from sqlalchemy.orm import Session
++
++from stockflow.db import SessionLocal
++from stockflow.models import Outbox
++
++
++EVENT_PUBLISH_URL = os.environ.get("EVENT_PUBLISH_URL", "http://event-bus:8080/events")
++
++
++def process_outbox(session: Session) -> int:
++    """Process one batch of pending outbox events.
++    
++    Returns the number of events processed.
++    """
++    # Claim unsent events with FOR UPDATE SKIP LOCKED
++    stmt = (
++        select(Outbox)
++        .where(Outbox.sent_at.is_(None))
++        .order_by(Outbox.created_at)
++        .limit(100)
++        .with_for_update(skip_locked=True)
++    )
++    events = session.scalars(stmt).all()
++    
++    if not events:
++        return 0
++    
++    for event in events:
++        # Increment attempts
++        event.attempts += 1
++        
++        try:
++            # Prepare headers with Idempotency-Key
++            headers = {"Idempotency-Key": str(event.event_id)}
++            
++            # Prepare payload
++            payload_data = {
++                "event_id": str(event.event_id),
++                "event_type": event.event_type,
++                "aggregate_id": str(event.aggregate_id),
++                "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
++                "payload": event.payload,
++            }
++            
++            response = httpx.post(
++                EVENT_PUBLISH_URL,
++                json=payload_data,
++                headers=headers,
++                timeout=30.0,
++            )
++            
++            if 200 <= response.status_code < 300:
++                # Success - mark as sent
++                event.sent_at = datetime.now(timezone.utc)
++                event.last_error = None
++            else:
++                # Failure - record error
++                event.last_error = f"HTTP {response.status_code}: {response.text[:200]}"
++        except Exception as e:
++            event.last_error = str(e)[:200]
++    
++    session.commit()
++    return len(events)
++
++
++def main() -> int:
++    """Main entry point for outbox worker."""
++    parser = argparse.ArgumentParser(description="Outbox worker for processing events")
++    parser.add_argument("--once", action="store_true", help="Process one batch and exit")
++    args = parser.parse_args()
++    
++    session = SessionLocal()
++    try:
++        process_outbox(session)
++        return 0
++    except Exception as e:
++        session.rollback()
++        print(f"Error processing outbox: {e}", file=sys.stderr)
++        return 1
++    finally:
++        session.close()
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+\ No newline at end of file

@@ -1,0 +1,2 @@
+model,track,task,evaluator_status,capability_score,code_health_score,agent_status,turns,prompt_tokens,completion_tokens,duration_seconds,public_tests_unchanged,run_dir
+gpt-oss:20b,zero_to_one,A00,error,0,100.0,no_tool_call,5,5372,288,15.24,True,./results/20260921T023103258573Z-gpt-oss-20b/runs/gpt-oss-20b/zero_to_one/A00

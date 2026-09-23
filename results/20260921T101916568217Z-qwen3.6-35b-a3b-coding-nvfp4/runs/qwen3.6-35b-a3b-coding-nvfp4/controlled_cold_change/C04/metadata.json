@@ -1,0 +1,39 @@
+{
+  "model": "qwen3.6:35b-a3b-coding-nvfp4",
+  "track": "controlled_cold_change",
+  "task": "C04",
+  "started_at": "2026-09-21T11:12:35.341286+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repeat_penalty": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 8192,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 57344,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "Implemented transactional outbox pattern for StockFlow:\n\n1. **OutboxEvent model** (models.py): Added `outbox_events` table with fields: `event_id`, `event_type`, `aggregate_id`, `occurred_at`, `payload`, `sent_at`, `attempts`, `last_error`.\n\n2. **Order creation** (main.py): `create_order` now inserts an `OutboxEvent` with `event_type=\"order.created\"` before `session.commit()`, ensuring domain update and outbox INSERT are in the same transaction.\n\n3. **Order cancellation** (main.py): `cancel_order` now inserts an `OutboxEvent` with `event_type=\"order.canceled\"` before `session.commit()`, same transaction semantics.\n\n4. **Outbox worker** (outbox_worker.py): \n   - `python -m stockflow.outbox_worker --once` CLI support\n   - Claims events via `SELECT FOR UPDATE SKIP LOCKED` (prevents concurrent worker claims)\n   - POSTs to `EVENT_PUBLISH_URL` with `Idempotency-Key` header = event_id\n   - On 2xx: updates `sent_at`\n   - On failure: increments `attempts` and sets `last_error`\n   - At-least-once delivery semantics\n\n5. **Migration** (alembic/versions/0002_add_outbox_events.py): Creates the `outbox_events` table.\n\nChecks run: syntax (pass), compose-config (pass)",
+    "turns": 19,
+    "last_prompt_tokens": 24446,
+    "prompt_tokens": 266790,
+    "completion_tokens": 7125,
+    "duration_seconds": 361.3
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 58,
+  "code_health_score": 100.0
+}

@@ -1,0 +1,64 @@
+{
+  "A00": {
+    "test_withheld_a00_1": 10,
+    "test_withheld_a00_2": 15,
+    "test_withheld_a00_3": 20,
+    "test_withheld_a00_4": 20,
+    "test_withheld_a00_5": 15,
+    "test_withheld_a00_6": 20
+  },
+  "C01": {
+    "test_withheld_c01_1": 30,
+    "test_withheld_c01_2": 25,
+    "test_withheld_c01_3": 20,
+    "test_withheld_c01_4": 5,
+    "test_withheld_c01_5": 4,
+    "test_withheld_c01_6": 4,
+    "test_withheld_c01_7": 4,
+    "test_withheld_c01_8": 4,
+    "test_withheld_c01_9": 4
+  },
+  "C02": {
+    "test_withheld_c02_1": 30,
+    "test_withheld_c02_2": 25,
+    "test_withheld_c02_3": 20,
+    "test_withheld_c02_4": 5,
+    "test_withheld_c02_5": 4,
+    "test_withheld_c02_6": 4,
+    "test_withheld_c02_7": 4,
+    "test_withheld_c02_8": 4,
+    "test_withheld_c02_9": 4
+  },
+  "C03": {
+    "test_withheld_c03_1": 30,
+    "test_withheld_c03_2": 25,
+    "test_withheld_c03_3": 20,
+    "test_withheld_c03_4": 5,
+    "test_withheld_c03_5": 4,
+    "test_withheld_c03_6": 4,
+    "test_withheld_c03_7": 4,
+    "test_withheld_c03_8": 4,
+    "test_withheld_c03_9": 4
+  },
+  "C04": {
+    "test_withheld_c04_1": 30,
+    "test_withheld_c04_2": 25,
+    "test_withheld_c04_3": 20,
+    "test_withheld_c04_4": 5,
+    "test_withheld_c04_5": 4,
+    "test_withheld_c04_6": 4,
+    "test_withheld_c04_7": 4,
+    "test_withheld_c04_8": 4,
+    "test_withheld_c04_9": 4
+  },
+  "C05": {
+    "test_withheld_c05_1": 40,
+    "test_withheld_c05_2": 35,
+    "test_withheld_c05_3": 5,
+    "test_withheld_c05_4": 4,
+    "test_withheld_c05_5": 4,
+    "test_withheld_c05_6": 4,
+    "test_withheld_c05_7": 4,
+    "test_withheld_c05_8": 4
+  }
+}

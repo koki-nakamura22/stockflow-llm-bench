@@ -1,0 +1,158 @@
+diff --git a/alembic/versions/0002_idempotency_keys.py b/alembic/versions/0002_idempotency_keys.py
+new file mode 100644
+index 0000000..0a2466c
+--- /dev/null
++++ b/alembic/versions/0002_idempotency_keys.py
+@@ -0,0 +1,33 @@
++"""idempotency keys table"""
++
++from alembic import op
++import sqlalchemy as sa
++import uuid
++
++
++revision = "0002_idempotency_keys"
++down_revision = "0001_initial"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.create_table(
++        "idempotency_keys",
++        sa.Column("id", sa.Uuid(), primary_key=True, default=uuid.uuid4),
++        sa.Column("tenant_id", sa.Uuid(), nullable=False),
++        sa.Column("key", sa.String(), nullable=False),
++        sa.Column("normalized_request", sa.String(), nullable=False),
++        sa.Column("order_id", sa.Uuid(), nullable=False),
++        sa.Column("status", sa.String(), nullable=False),
++        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
++        sa.UniqueConstraint("tenant_id", "key", name="uq_idempotency_keys_tenant_key"),
++    )
++    op.create_index(
++        "ix_idempotency_keys_tenant_key", "idempotency_keys", ["tenant_id", "key"], unique=False
++    )
++
++
++def downgrade() -> None:
++    op.drop_index("ix_idempotency_keys_tenant_key", table_name="idempotency_keys")
++    op.drop_table("idempotency_keys")
+\ No newline at end of file
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..0a262c4 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,5 +1,7 @@
+ import uuid
++import re
+ from collections import defaultdict
++from datetime import datetime
+ from typing import Any
+ 
+ from fastapi import Depends, FastAPI, Header, Request
+@@ -52,6 +54,41 @@ def tenant_id(x_tenant_id: str | None = Header(default=None)) -> uuid.UUID:
+         raise ApiError(400, "INVALID_TENANT", "X-Tenant-Id must be a UUID") from exc
+ 
+ 
++def _validate_idempotency_key(key: str | None = Header(default=None)) -> str:
++    """Validate the Idempotency-Key header.
++    
++    - ASCII 1-128 characters, required
++    - scope is tenant_id + endpoint + key
++    """
++    if key is None:
++        raise ApiError(400, "MISSING_IDEMPOTENCY_KEY", "Idempotency-Key header is required")
++    if not isinstance(key, str):
++        raise ApiError(400, "INVALID_IDEMPOTENCY_KEY", "Idempotency-Key must be a string")
++    if len(key) < 1 or len(key) > 128:
++        raise ApiError(400, "INVALID_IDEMPOTENCY_KEY", "Idempotency-Key must be between 1 and 128 ASCII characters")
++    if not all(32 <= ord(c) <= 126 for c in key):
++        raise ApiError(400, "INVALID_IDEMPOTENCY_KEY", "Idempotency-Key must contain only ASCII printable characters (32-126)")
++    return key
++
++
++def _normalize_order_request(body: dict) -> str:
++    """Normalize the order request body for idempotency key comparison.
++    
++    Creates a canonical representation by sorting items by product_id
++    and extracting essential fields.
++    """
++    items = body.get("items", [])
++    # Sort items by product_id for canonical representation
++    sorted_items = sorted(items, key=lambda x: x.get("product_id", ""))
++    # Create a normalized string representation
++    item_reprs = []
++    for item in sorted_items:
++        product_id = item.get("product_id", "")
++        quantity = item.get("quantity", 0)
++        item_reprs.append(f"{product_id}:{quantity}")
++    return "|".join(item_reprs)
++
++
+ def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: bool = False) -> Order:
+     stmt = (
+         select(Order)
+@@ -108,7 +145,30 @@ def create_order(
+     body: OrderCreate,
+     tenant: uuid.UUID = Depends(tenant_id),
+     session: Session = Depends(get_session),
++    idempotency_key: str = Depends(_validate_idempotency_key),
+ ) -> Order:
++    # Normalize the request body for idempotency comparison
++    normalized = _normalize_order_request(body.model_dump())
++
++    # Check for existing idempotency key for this tenant
++    result = session.execute(
++        text("SELECT normalized_request, order_id FROM idempotency_keys WHERE tenant_id = :tenant AND key = :key"),
++        {"tenant": str(tenant), "key": idempotency_key}
++    ).first()
++
++    if result is not None:
++        existing_normalized, existing_order_id = result
++        if existing_normalized == normalized:
++            # Same request - return the existing order (idempotent retry)
++            order = session.get(Order, existing_order_id)
++            if order is not None:
++                session.expire_all()
++                return load_order(session, tenant, order.id)
++        else:
++            # Different normalized request - conflict
++            raise ApiError(409, "IDEMPOTENCY_CONFLICT", "Idempotency key conflict: different request with same key")
++
++    # New key - proceed with order creation
+     quantities: dict[uuid.UUID, int] = defaultdict(int)
+     for item in body.items:
+         quantities[item.product_id] += item.quantity
+@@ -153,6 +213,25 @@ def create_order(
+         session.rollback()
+         raise
+     session.expire_all()
++
++    # Record the idempotency key after successful order creation
++    # Use INSERT ... ON CONFLICT to handle race conditions between concurrent requests
++    session.execute(
++        text(
++            "INSERT INTO idempotency_keys (id, tenant_id, key, normalized_request, order_id, status) "
++            "VALUES (:id, :tenant_id, :key, :normalized_request, :order_id, 'SUCCESS') "
++            "ON CONFLICT (tenant_id, key) DO NOTHING"
++        ),
++        {
++            "id": str(order.id),
++            "tenant_id": str(tenant),
++            "key": idempotency_key,
++            "normalized_request": normalized,
++            "order_id": str(order.id),
++        }
++    )
++    session.commit()
++
+     return load_order(session, tenant, order.id)
+ 
+ 
+@@ -190,4 +269,4 @@ def cancel_order(
+         session.rollback()
+         raise
+     session.expire_all()
+-    return load_order(session, tenant, order.id)
++    return load_order(session, tenant, order.id)
+\ No newline at end of file

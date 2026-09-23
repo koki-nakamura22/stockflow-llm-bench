@@ -1,0 +1,311 @@
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..a7008a6 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -11,38 +11,29 @@ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+ from stockflow.models import Order, OrderItem, Product
+-from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
++from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut, OrderQuery, OrderPage
++from stockflow.utils import encode_cursor, decode_cursor
+ 
+ app = FastAPI(title="StockFlow Mini")
+-
+-
+ class ApiError(Exception):
+     def __init__(self, status: int, code: str, message: str, details: dict[str, Any] | None = None):
+         self.status = status
+         self.code = code
+         self.message = message
+         self.details = details or {}
+-
+-
+ def error_body(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
+     return {"error": {"code": code, "message": message, "details": details or {}}}
+-
+-
+ @app.exception_handler(ApiError)
+ def api_error_handler(_request: Request, exc: ApiError) -> JSONResponse:
+     return JSONResponse(
+         status_code=exc.status, content=error_body(exc.code, exc.message, exc.details)
+     )
+-
+-
+ @app.exception_handler(RequestValidationError)
+ def validation_error_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+     return JSONResponse(
+         status_code=422,
+         content=error_body("VALIDATION_ERROR", "Invalid request", {"errors": exc.errors()}),
+     )
+-
+-
+ def tenant_id(x_tenant_id: str | None = Header(default=None)) -> uuid.UUID:
+     try:
+         if x_tenant_id is None:
+@@ -50,8 +41,6 @@ def tenant_id(x_tenant_id: str | None = Header(default=None)) -> uuid.UUID:
+         return uuid.UUID(x_tenant_id)
+     except ValueError as exc:
+         raise ApiError(400, "INVALID_TENANT", "X-Tenant-Id must be a UUID") from exc
+-
+-
+ def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: bool = False) -> Order:
+     stmt = (
+         select(Order)
+@@ -64,14 +53,10 @@ def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: b
+     if order is None:
+         raise ApiError(404, "NOT_FOUND", "Order not found")
+     return order
+-
+-
+ @app.get("/health")
+ def health(session: Session = Depends(get_session)) -> dict[str, str]:
+     session.execute(text("SELECT 1"))
+     return {"status": "ok"}
+-
+-
+ @app.post("/products", response_model=ProductOut, status_code=201)
+ def create_product(
+     body: ProductCreate,
+@@ -87,8 +72,6 @@ def create_product(
+         raise ApiError(409, "SKU_ALREADY_EXISTS", "SKU already exists") from exc
+     session.refresh(product)
+     return product
+-
+-
+ @app.get("/products/{product_id}", response_model=ProductOut)
+ def get_product(
+     product_id: uuid.UUID,
+@@ -101,8 +84,6 @@ def get_product(
+     if product is None:
+         raise ApiError(404, "NOT_FOUND", "Product not found")
+     return product
+-
+-
+ @app.post("/orders", response_model=OrderOut, status_code=201)
+ def create_order(
+     body: OrderCreate,
+@@ -154,8 +135,6 @@ def create_order(
+         raise
+     session.expire_all()
+     return load_order(session, tenant, order.id)
+-
+-
+ @app.get("/orders/{order_id}", response_model=OrderOut)
+ def get_order(
+     order_id: uuid.UUID,
+@@ -163,8 +142,6 @@ def get_order(
+     session: Session = Depends(get_session),
+ ) -> Order:
+     return load_order(session, tenant, order_id)
+-
+-
+ @app.post("/orders/{order_id}/cancel", response_model=OrderOut)
+ def cancel_order(
+     order_id: uuid.UUID,
+@@ -191,3 +168,79 @@ def cancel_order(
+         raise
+     session.expire_all()
+     return load_order(session, tenant, order.id)
++# New endpoint for paginated orders
++@app.get("/orders", response_model=OrderPage)
++def list_orders(
++    query: OrderQuery = Depends(),
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> OrderPage:
++    """List orders with cursor pagination."""
++    # Validate cursor if provided
++    cursor_data = None
++    if query.cursor:
++        try:
++            cursor_data = decode_cursor(query.cursor)
++        except ValueError:
++            raise ApiError(400, "INVALID_CURSOR", "Invalid or tampered cursor")
++        # Validate that cursor's filters match current query
++        if cursor_data["status"] != query.status:
++            raise ApiError(400, "INVALID_CURSOR", "Filter status mismatch")
++        if cursor_data["created_from"] != query.created_from:
++            raise ApiError(400, "INVALID_CURSOR", "Filter created_from mismatch")
++        if cursor_data["created_to"] != query.created_to:
++            raise ApiError(400, "INVALID_CURSOR", "Filter created_to mismatch")
++
++    # Build WHERE clause
++    where_clauses = [Order.tenant_id == tenant]
++    if query.status is not None:
++        where_clauses.append(Order.status == query.status)
++    if query.created_from is not None:
++        where_clauses.append(Order.created_at >= query.created_from)
++    if query.created_to is not None:
++        where_clauses.append(Order.created_at <= query.created_to)
++    # If we have a cursor, add exclusive filter based on keyset pagination
++    if cursor_data is not None:
++        last_created_at = cursor_data["created_at"]
++        last_order_id = cursor_data["id"]
++        where_clauses.append(
++            (Order.created_at < last_created_at) |
++            ((Order.created_at == last_created_at) & (Order.id < last_order_id))
++        )
++
++    # Order by the same ordering used for pagination
++    stmt = select(Order).where(*where_clauses).order_by(Order.created_at.desc(), Order.id.desc())
++
++    # Apply limit (but we need to fetch limit + 1 to detect next page)
++    limit = query.limit + 1
++    stmt = stmt.limit(limit)
++
++    orders = session.scalars(stmt).all()
++
++    # Determine next cursor
++    next_cursor = None
++    if len(orders) > query.limit:
++        # There is a next page, take the last order for cursor (the one after the limit)
++        # The last order of this page is orders[-1] (since we fetched limit+1)
++        last_of_page = orders[-1]
++        next_cursor = encode_cursor(
++            created_at=last_of_page.created_at,
++            order_id=last_of_page.id,
++            status=query.status,
++            created_from=query.created_from,
++            created_to=query.created_to,
++        )
++        # Slice to only the first limit orders
++        orders = orders[:query.limit]
++
++    # Eager load items for each order
++    for order in orders:
++        session.expire(order, ['items'])
++        session.refresh(order, ['items'])
++
++    # Convert to OrderOut via the schema (simple model_dump)
++    order_outs = []
++    for order in orders:
++        order_outs.append(OrderOut.model_validate(order))
++
++    return OrderPage(items=order_outs, next_cursor=next_cursor)
+\ No newline at end of file
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..5d18470 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -2,32 +2,22 @@ import uuid
+ from datetime import datetime
+ 
+ from pydantic import BaseModel, ConfigDict, Field
+-
+-
+ class ProductCreate(BaseModel):
+     sku: str = Field(min_length=1, max_length=64)
+     name: str = Field(min_length=1, max_length=200)
+     unit_price: int = Field(ge=0)
+     stock: int = Field(ge=0)
+-
+-
+ class ProductOut(ProductCreate):
+     model_config = ConfigDict(from_attributes=True)
+     id: uuid.UUID
+     tenant_id: uuid.UUID
+     created_at: datetime
+     updated_at: datetime
+-
+-
+ class OrderItemCreate(BaseModel):
+     product_id: uuid.UUID
+     quantity: int = Field(gt=0)
+-
+-
+ class OrderCreate(BaseModel):
+     items: list[OrderItemCreate] = Field(min_length=1)
+-
+-
+ class OrderItemOut(BaseModel):
+     model_config = ConfigDict(from_attributes=True)
+     id: uuid.UUID
+@@ -38,8 +28,6 @@ class OrderItemOut(BaseModel):
+     unit_price: int
+     quantity: int
+     line_amount: int
+-
+-
+ class OrderOut(BaseModel):
+     model_config = ConfigDict(from_attributes=True)
+     id: uuid.UUID
+@@ -49,4 +37,12 @@ class OrderOut(BaseModel):
+     created_at: datetime
+     updated_at: datetime
+     items: list[OrderItemOut]
+-
++class OrderQuery(BaseModel):
++    limit: int = Field(1, ge=1, le=100)
++    status: str | None = None
++    created_from: datetime | None = None
++    created_to: datetime | None = None
++    cursor: str | None = None
++class OrderPage(BaseModel):
++    items: list[OrderOut]
++    next_cursor: str | None = None
+\ No newline at end of file
+diff --git a/stockflow/utils.py b/stockflow/utils.py
+new file mode 100644
+index 0000000..3ae79da
+--- /dev/null
++++ b/stockflow/utils.py
+@@ -0,0 +1,57 @@
++import base64
++import hashlib
++import hmac
++import json
++import os
++from datetime import datetime
++from typing import Optional, Tuple
++from uuid import UUID
++
++CURSOR_SECRET = os.environ.get("CURSOR_SECRET")
++if not CURSOR_SECRET:
++    raise RuntimeError("CURSOR_SECRET environment variable must be set")
++
++SECRET = CURSOR_SECRET.encode()
++def encode_cursor(created_at: datetime, order_id: UUID, status: Optional[str], created_from: Optional[datetime], created_to: Optional[datetime], tenant_id: UUID) -> str:
++    """Encode cursor with tamper detection."""
++    payload = {
++        "created_at": created_at.isoformat(),
++        "id": str(order_id),
++        "status": status,
++        "created_from": created_from.isoformat() if created_from else None,
++        "created_to": created_to.isoformat() if created_to else None,
++        "tenant_id": str(tenant_id),
++    }
++    payload_json = json.dumps(payload, separators=(',', ':'))
++    signature = hmac.new(SECRET, payload_json.encode(), hashlib.sha256).hexdigest()
++    token = base64.urlsafe_b64encode(f"{payload_json}.{signature}".encode()).decode()
++    return token
++def decode_cursor(token: str) -> dict:
++    """Decode cursor and verify signature. Returns dict with keys: created_at, id, status, created_from, created_to, tenant_id."""
++    try:
++        token_bytes = base64.urlsafe_b64decode(token.encode())
++        payload_json, signature = token_bytes.decode().rsplit('.', 1)
++        # Verify signature
++        expected_sig = hmac.new(SECRET, payload_json.encode(), hashlib.sha256).hexdigest()
++        if not hmac.compare_digest(signature, expected_sig):
++            raise ValueError("Invalid signature")
++        payload = json.loads(payload_json)
++        created_at = datetime.fromisoformat(payload["created_at"])
++        order_id = UUID(payload["id"])
++        status = payload.get("status")
++        created_from = datetime.fromisoformat(payload["created_from"]) if payload.get("created_from") else None
++        created_to = datetime.fromisoformat(payload["created_to"]) if payload.get("created_to") else None
++        tenant_id = UUID(payload["tenant_id"])
++        return {
++            "created_at": created_at,
++            "id": order_id,
++            "status": status,
++            "created_from": created_from,
++            "created_to": created_to,
++            "tenant_id": tenant_id,
++        }
++    except Exception as exc:
++        raise ValueError("Invalid cursor") from exc
++if __name__ == "__main__":
++    # simple test
++    pass
+\ No newline at end of file

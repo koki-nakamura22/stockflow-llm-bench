@@ -1,0 +1,158 @@
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..fc66d44 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,17 +1,22 @@
++import base64
++import hashlib
++import hmac
++import json
++import os
+ import uuid
+ from collections import defaultdict
++from datetime import datetime
+ from typing import Any
+ 
+-from fastapi import Depends, FastAPI, Header, Request
++from fastapi import Depends, FastAPI, Header, Query, Request
+ from fastapi.exceptions import RequestValidationError
+ from fastapi.responses import JSONResponse
+-from sqlalchemy import select, text
++from sqlalchemy import and_, select, text
+ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+ from stockflow.models import Order, OrderItem, Product
+-from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
+ 
+ app = FastAPI(title="StockFlow Mini")
+ 
+@@ -28,6 +33,45 @@ def error_body(code: str, message: str, details: dict[str, Any] | None = None) -
+     return {"error": {"code": code, "message": message, "details": details or {}}}
+ 
+ 
++CURSOR_SECRET = os.environ.get("CURSOR_SECRET", "")
++
++
++def encode_cursor(payload: Any) -> str:
++    """Encode cursor payload with signature."""
++    payload_json = payload.model_dump_json()
++    signature = hmac.new(
++        CURSOR_SECRET.encode(),
++        payload_json.encode(),
++        hashlib.sha256,
++    ).hexdigest()
++    combined = f"{signature}:{payload_json}"
++    return base64.urlsafe_b64encode(combined.encode()).decode()
++
++
++def decode_cursor(cursor: str) -> dict:
++    """Decode and verify cursor payload."""
++    try:
++        data = base64.urlsafe_b64decode(cursor.encode()).decode()
++    except Exception:
++        raise ApiError(400, "INVALID_CURSOR", "Invalid cursor format")
++
++    if ":" not in data:
++        raise ApiError(400, "INVALID_CURSOR", "Invalid cursor format")
++
++    signature, payload_json = data.split(":", 1)
++    
++    expected_signature = hmac.new(
++        CURSOR_SECRET.encode(),
++        payload_json.encode(),
++        hashlib.sha256,
++    ).hexdigest()
++    
++    if not hmac.compare_digest(signature, expected_signature):
++        raise ApiError(400, "INVALID_CURSOR", "Invalid cursor signature")
++
++    return json.loads(payload_json)
++
++
+ @app.exception_handler(ApiError)
+ def api_error_handler(_request: Request, exc: ApiError) -> JSONResponse:
+     return JSONResponse(
+@@ -189,5 +233,66 @@ def cancel_order(
+     except ApiError:
+         session.rollback()
+         raise
+-    session.expire_all()
+-    return load_order(session, tenant, order.id)
++
++
++@app.get("/orders", response_model=OrderListResponse)
++def list_orders(
++    limit: int = Query(..., ge=1, le=100, description="Number of items per page"),
++    status: str | None = Query(None, description="Filter by order status"),
++    created_from: datetime | None = Query(None, description="Filter by created date (inclusive)"),
++    created_to: datetime | None = Query(None, description="Filter by created date (inclusive)"),
++    cursor: str | None = Query(None, description="Pagination cursor"),
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> OrderListResponse:
++    """List orders with cursor-based pagination."""
++    # Build base query with tenant filter
++    stmt = select(Order).where(Order.tenant_id == tenant)
++    
++    # Apply status filter if provided
++    if status:
++        stmt = stmt.where(Order.status == status)
++    
++    # Apply date range filter if provided
++    if created_from:
++        stmt = stmt.where(Order.created_at >= created_from)
++    if created_to:
++        stmt = stmt.where(Order.created_at <= created_to)
++    
++    # Get cursor payload if provided
++    cursor_payload = None
++    if cursor:
++        try:
++            cursor_payload = decode_cursor(cursor)
++            # Verify cursor is for the same tenant
++            stmt = stmt.where(
++                and_(
++                    Order.created_at < cursor_payload["created_at"],
++                    Order.id < cursor_payload["id"],
++                )
++            )
++        except ApiError:
++            raise ApiError(400, "INVALID_CURSOR", "Invalid cursor")
++    
++    # Execute query with pagination and ordering
++    stmt = stmt.order_by(Order.created_at.desc(), Order.id.desc()).limit(limit + 1)
++    
++    orders = session.scalars(stmt).all()
++    
++    # Determine next cursor
++    next_cursor = None
++    if len(orders) > limit:
++        next_cursor = encode_cursor({
++            "created_at": orders[limit].created_at,
++            "id": orders[limit].id,
++        })
++        orders = orders[:limit]
++    
++    # Load items for each order
++    result_items = []
++    for order in orders:
++        session.expire(order)
++        session.refresh(order)
++        result_items.append(load_order(session, tenant, order.id))
++    
++    return OrderListResponse(items=result_items, next_cursor=next_cursor)
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..2dbd336 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -50,3 +50,8 @@ class OrderOut(BaseModel):
+     updated_at: datetime
+     items: list[OrderItemOut]
+ 
++
++class OrderListResponse(BaseModel):
++    items: list[OrderOut]
++    next_cursor: str | None = None
++

@@ -1,0 +1,100 @@
+diff --git a/alembic/versions/0002_add_idempotency_table.py b/alembic/versions/0002_add_idempotency_table.py
+new file mode 100644
+index 0000000..8810375
+--- /dev/null
++++ b/alembic/versions/0002_add_idempotency_table.py
+@@ -0,0 +1,29 @@
++"""add idempotency table"""
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++
++revision = "0002_add_idempotency_table"
++down_revision = "0001_initial"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.create_table(
++        "idempotency_records",
++        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
++        sa.Column("tenant_id", postgresql.UUID(as_uuid=True), nullable=False),
++        sa.Column("endpoint", sa.String(255), nullable=False),
++        sa.Column("idempotency_key", sa.String(128), nullable=False),
++        sa.Column("request_hash", sa.String(64), nullable=False),
++        sa.Column("response_body", sa.String(), nullable=False),
++        sa.Column("response_status_code", sa.Integer(), nullable=False),
++        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
++        sa.UniqueConstraint("tenant_id", "endpoint", "idempotency_key", name="uq_idempotency_records_tenant_endpoint_key"),
++    )
++    op.create_index("ix_idempotency_records_tenant_id", "idempotency_records", ["tenant_id"])
++
++
++def downgrade() -> None:
++    op.drop_table("idempotency_records")
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..1e972c9 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -10,9 +10,12 @@ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+-from stockflow.models import Order, OrderItem, Product
++from stockflow.models import Order, OrderItem, Product, IdempotencyRecord
+ from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
+ 
++import hashlib
++import json
++
+ app = FastAPI(title="StockFlow Mini")
+ 
+ 
+@@ -131,7 +134,8 @@ def create_order(
+         session.add(order)
+         session.flush()
+         total = 0
+-        for product in products:
++        for product in
++            products:
+             quantity = quantities[product.id]
+             product.stock -= quantity
+             line_amount = product.unit_price * quantity
+@@ -190,4 +194,4 @@ def cancel_order(
+         session.rollback()
+         raise
+     session.expire_all()
+-    return load_order(session, tenant, order.id)
++    return loadint_order(session, tenant, order.id)
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..9292ee6 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -48,7 +48,6 @@ class Order(Base):
+ 
+ 
+ class OrderItem(Base):
+-    __tablename__ = "order_items"
+     __table_args__ = (
+         CheckConstraint("quantity > 0", name="ck_order_items_quantity"),
+         CheckConstraint("unit_price >= 0", name="ck_order_items_price"),
+@@ -67,3 +66,18 @@ class OrderItem(Base):
+     line_amount: Mapped[int] = mapped_column(Integer)
+     order: Mapped[Order] = relationship(back_populates="items")
+ 
++
++class IdempotencyRecord(Base):
++    __tablename__ = "idempotency_records"
++    __table_args__ = (
++        UniqueConstraint("tenant_id", "endpoint", "idempotency_key", name="uq_idempotency_records_tenant_endpoint_key"),
++    )
++
++    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
++    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
++    endpoint: Mapped[str] = mapped_column(String(255))
++    idempotency_key: Mapped[str] = mapped_column(String(128))
++    request_hash: Mapped[str] = mapped_column(String(64))
++    response_body: Mapped[str] = mapped_column(String)
++    response_status_code: Mapped[int] = mapped_column(Integer)
++    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -1,0 +1,7 @@
+model,track,task,evaluator_status,capability_score,code_health_score,agent_status,turns,prompt_tokens,completion_tokens,duration_seconds,public_tests_unchanged,run_dir
+north-mini-code-1.0:latest,zero_to_one,A00,completed,0,70.0,context_exceeded,38,604062,30277,2028.509,True,./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/zero_to_one/A00
+north-mini-code-1.0:latest,controlled_cold_change,C01,completed,45,90.0,max_turns,40,598728,14025,972.319,True,./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/controlled_cold_change/C01
+north-mini-code-1.0:latest,controlled_cold_change,C02,error,0,85.0,completed,38,493338,9270,627.527,True,./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/controlled_cold_change/C02
+north-mini-code-1.0:latest,controlled_cold_change,C03,completed,100,100.0,max_turns,40,715684,22632,1701.421,True,./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/controlled_cold_change/C03
+north-mini-code-1.0:latest,controlled_cold_change,C04,error,0,100.0,max_turns,40,601186,17906,1205.37,True,./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/controlled_cold_change/C04
+north-mini-code-1.0:latest,controlled_cold_change,C05,error,0,100.0,context_exceeded,33,666500,29206,1997.096,True,./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/controlled_cold_change/C05

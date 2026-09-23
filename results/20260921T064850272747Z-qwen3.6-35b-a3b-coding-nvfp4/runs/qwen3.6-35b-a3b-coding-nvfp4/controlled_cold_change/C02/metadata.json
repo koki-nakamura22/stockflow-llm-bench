@@ -1,0 +1,31 @@
+{
+  "model": "qwen3.6:35b-a3b-coding-nvfp4",
+  "track": "controlled_cold_change",
+  "task": "C02",
+  "started_at": "2026-09-21T07:11:15.157356+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "off",
+    "context_window": 32768,
+    "max_output_tokens": 8192,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 24576,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "Implemented idempotency for `POST /orders` endpoint:\n\n1. **IdempotencyKey model** (stockflow/models.py): Added new `IdempotencyKey` table with fields:\n   - `tenant_id`: UUID (scoped per tenant)\n   - `scope`: String(256) - composite of tenant_id + endpoint + key\n   - `request_body`: String(4096) - normalized request body for conflict detection\n   - `response_status`: int - HTTP status code (201 for success)\n   - `response_body`: String(8192) - cached response body\n   - Unique constraint on (tenant_id, scope)\n\n2. **Migration** (alembic/versions/0001_initial.py): Added `idempotency_keys` table with proper indexes and constraints.\n\n3. **Idempotency logic** (stockflow/main.py):\n   - `Idempotency-Key` header is required (ASCII 1-128 characters)\n   - Scope is `tenant_id + endpoint + key`\n   - On first request: creates order, stores successful result\n   - On duplicate key with same body: returns cached 201 response without re-subtracting inventory\n   - On duplicate key with different body: returns 409 `IDEMPOTENCY_CONFLICT`\n   - Validation failures, insufficient stock, and rollbacks are NOT recorded as successful results\n   - Concurrent requests with same key are handled via row-level locking (`with_for_update()`)\n   - Different tenants can use the same key (scope includes tenant_id)\n   - Existing response schema is preserved (OrderOut unchanged)\n\n4. **Checks run**: syntax (pass), compose-config (pass)",
+    "turns": 25,
+    "last_prompt_tokens": 24118,
+    "prompt_tokens": 278739,
+    "completion_tokens": 7495,
+    "duration_seconds": 375.995
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 75,
+  "code_health_score": 85.0
+}

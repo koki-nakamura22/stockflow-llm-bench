@@ -1,0 +1,181 @@
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..c318282 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,8 +1,14 @@
++import base64
++import hashlib
++import hmac
++import json
++import os
+ import uuid
+ from collections import defaultdict
++from datetime import datetime
+ from typing import Any
+ 
+-from fastapi import Depends, FastAPI, Header, Request
++from fastapi import Depends, FastAPI, Header, Query, Request
+ from fastapi.exceptions import RequestValidationError
+ from fastapi.responses import JSONResponse
+ from sqlalchemy import select, text
+@@ -11,10 +17,18 @@ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+ from stockflow.models import Order, OrderItem, Product
+-from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
++from stockflow.schemas import (
++    OrderCreate,
++    OrderOut,
++    OrdersListOut,
++    ProductCreate,
++    ProductOut,
++)
+ 
+ app = FastAPI(title="StockFlow Mini")
+ 
++CURSOR_SECRET = os.environ.get("CURSOR_SECRET", "default-secret")
++
+ 
+ class ApiError(Exception):
+     def __init__(self, status: int, code: str, message: str, details: dict[str, Any] | None = None):
+@@ -66,6 +80,52 @@ def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: b
+     return order
+ 
+ 
++# Cursor utilities: opaque, tamper-evident using HMAC
++def _encode_cursor(data: dict[str, Any]) -> str:
++    """Encode cursor data with HMAC signature."""
++    payload = json.dumps(data, separators=(",", ":"), sort_keys=True)
++    signature = hmac.new(
++        CURSOR_SECRET.encode("utf-8"),
++        payload.encode("utf-8"),
++        hashlib.sha256,
++    ).hexdigest()
++    combined = f"{payload}.{signature}"
++    return base64.urlsafe_b64encode(combined.encode("utf-8")).decode("utf-8")
++
++
++def _decode_cursor(token: str, expected_filters: dict[str, Any]) -> dict[str, Any]:
++    """Decode and verify cursor, checking filters match."""
++    try:
++        raw = base64.urlsafe_b64decode(token.encode("utf-8")).decode("utf-8")
++        # Split into payload and signature
++        dot_idx = raw.rfind(".")
++        if dot_idx == -1:
++            raise ValueError("invalid format")
++        payload_str = raw[:dot_idx]
++        signature = raw[dot_idx + 1 :]
++
++        # Verify HMAC
++        expected_sig = hmac.new(
++            CURSOR_SECRET.encode("utf-8"),
++            payload_str.encode("utf-8"),
++            hashlib.sha256,
++        ).hexdigest()
++        if not hmac.compare_digest(signature, expected_sig):
++            raise ValueError("signature mismatch")
++
++        data = json.loads(payload_str)
++
++        # Verify filters match the expected ones
++        stored_filters = data.get("_filters", {})
++        for key, value in expected_filters.items():
++            if stored_filters.get(key) != value:
++                raise ValueError("filters mismatch")
++
++        return data
++    except Exception as exc:
++        raise ApiError(400, "INVALID_CURSOR", "Cursor is invalid or expired") from exc
++
++
+ @app.get("/health")
+ def health(session: Session = Depends(get_session)) -> dict[str, str]:
+     session.execute(text("SELECT 1"))
+@@ -165,6 +225,73 @@ def get_order(
+     return load_order(session, tenant, order_id)
+ 
+ 
++@app.get("/orders", response_model=OrdersListOut)
++def list_orders(
++    limit: int = Query(ge=1, le=100),
++    status: str | None = Query(default=None),
++    created_from: datetime | None = Query(default=None),
++    created_to: datetime | None = Query(default=None),
++    cursor: str | None = Query(default=None),
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> OrdersListOut:
++    # Build base query with tenant filter
++    stmt = select(Order).where(Order.tenant_id == tenant)
++
++    # Apply status filter
++    if status is not None:
++        stmt = stmt.where(Order.status == status)
++
++    # Apply created_from filter
++    if created_from is not None:
++        stmt = stmt.where(Order.created_at >= created_from)
++
++    # Apply created_to filter
++    if created_to is not None:
++        stmt = stmt.where(Order.created_at <= created_to)
++
++    # Build expected filters for cursor validation
++    expected_filters: dict[str, Any] = {
++        "status": status,
++        "created_from": created_from.isoformat() if created_from else None,
++        "created_to": created_to.isoformat() if created_to else None,
++    }
++
++    # Apply cursor-based pagination
++    if cursor is not None:
++        cursor_data = _decode_cursor(cursor, expected_filters)
++        cursor_created_at = datetime.fromisoformat(cursor_data["created_at"])
++        cursor_id = uuid.UUID(cursor_data["id"])
++        # Find orders strictly "before" the cursor position
++        # (created_at DESC, id DESC) means we want items that are less than cursor
++        stmt = stmt.where(
++            (Order.created_at < cursor_created_at)
++            | (Order.created_at == cursor_created_at & Order.id < cursor_id)
++        )
++
++    # Order by created_at DESC, id DESC
++    stmt = stmt.order_by(Order.created_at.desc(), Order.id.desc())
++
++    # Fetch one extra to determine if there's a next page
++    stmt = stmt.limit(limit + 1)
++
++    orders = session.scalars(stmt).all()
++
++    # Determine if there's a next cursor
++    next_cursor: str | None = None
++    if len(orders) > limit:
++        orders = orders[:limit]
++        last_order = orders[-1]
++        next_data = {
++            "created_at": last_order.created_at.isoformat(),
++            "id": str(last_order.id),
++            "_filters": expected_filters,
++        }
++        next_cursor = _encode_cursor(next_data)
++
++    return OrdersListOut(items=orders, next_cursor=next_cursor)
++
++
+ @app.post("/orders/{order_id}/cancel", response_model=OrderOut)
+ def cancel_order(
+     order_id: uuid.UUID,
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..264ad26 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -50,3 +50,9 @@ class OrderOut(BaseModel):
+     updated_at: datetime
+     items: list[OrderItemOut]
+ 
++
++class OrdersListOut(BaseModel):
++    model_config = ConfigDict(from_attributes=True)
++    items: list[OrderOut]
++    next_cursor: str | None = None
++

@@ -1,0 +1,1 @@
+"""Alembic migration directory for StockFlow Mini."""

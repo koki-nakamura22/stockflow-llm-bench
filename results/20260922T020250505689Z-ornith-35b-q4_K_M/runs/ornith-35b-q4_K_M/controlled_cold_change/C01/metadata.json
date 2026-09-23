@@ -1,0 +1,36 @@
+{
+  "model": "ornith:35b-q4_K_M",
+  "track": "controlled_cold_change",
+  "task": "C01",
+  "started_at": "2026-09-22T02:36:57.629462+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "## Implementation Summary: C01 Cursor Pagination for `GET /orders`\n\n### Changes Made\n\n**`stockflow/schemas.py`** — Added `OrderListResponse` Pydantic model:\n```python\nclass OrderListResponse(BaseModel):\n    items: list[OrderOut]\n    next_cursor: str | None = None\n```\n\n**`stockflow/main.py`** — Added:\n1. **Cursor helpers** (`_cursor_encode` / `_cursor_decode`) — HMAC-SHA256 signed, base64url-encoded JSON payload. Format: `<b64>.<hex-sig>`. Tamper-evident via `hmac.compare_digest`.\n2. **`_parse_dt`** — Safe ISO-datetime parser with UTC fallback.\n3. **`GET /orders` endpoint** with:\n   - `limit` (required, 1–100)\n   - Optional `status`, `created_from`, `created_to`, `cursor` query params\n   - Order: `created_at DESC, id DESC`\n   - Cursor-based filtering using `(created_at, id) < (cursor_created_at, cursor_id)` to avoid duplicates/gaps\n   - Filter mismatch detection (cursor includes `status`, `created_from`, `created_to` in its signed payload)\n   - Returns `{\"items\": [...], \"next_cursor\": \"string or null\"}`\n   - Tenant isolation via `tenant_id` dependency (inherited from existing pattern)\n\n### Verification\n- `syntax` check: ✅ pass\n- `compose-config` check: ✅ pass\n- `public-tests`: ⏭ skipped (integration tests requiring live server)",
+    "turns": 14,
+    "last_prompt_tokens": 18299,
+    "prompt_tokens": 140066,
+    "completion_tokens": 5552,
+    "duration_seconds": 284.286
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 100,
+  "code_health_score": 90.0
+}

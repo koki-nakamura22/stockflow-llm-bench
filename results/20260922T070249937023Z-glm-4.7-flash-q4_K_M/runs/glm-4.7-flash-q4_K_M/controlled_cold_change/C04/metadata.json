@@ -1,0 +1,35 @@
+{
+  "model": "glm-4.7-flash:q4_K_M",
+  "track": "controlled_cold_change",
+  "task": "C04",
+  "started_at": "2026-09-22T09:06:44.244780+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.7,
+      "top_p": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "model_error",
+    "error": "TimeoutError: timed out",
+    "summary": "",
+    "turns": 32,
+    "last_prompt_tokens": 20083,
+    "prompt_tokens": 370551,
+    "completion_tokens": 9881,
+    "duration_seconds": 2535.377
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 45,
+  "code_health_score": 100.0
+}

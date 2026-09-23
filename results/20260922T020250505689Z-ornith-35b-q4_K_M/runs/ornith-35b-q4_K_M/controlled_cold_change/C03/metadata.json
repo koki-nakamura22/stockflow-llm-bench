@@ -1,0 +1,36 @@
+{
+  "model": "ornith:35b-q4_K_M",
+  "track": "controlled_cold_change",
+  "task": "C03",
+  "started_at": "2026-09-22T02:55:06.373424+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "## 実装完了: 注文状態遷移 (C03)\n\n### 変更点: `stockflow/main.py`\n\n1. **`POST /orders/{id}/confirm` 追加** (183-199行)\n   - PENDING → CONFIRMED への遷移\n   - `with_for_update()` で行ロックし、競合時の安全性を確保\n   - 在庫操作なし（不変）\n\n2. **`POST /orders/{id}/ship` 追加** (202-218行)\n   - CONFIRMED → SHIPPED への遷移\n   - 同様に行ロックで競合安全\n   - 在庫操作なし（不変）\n\n3. **`POST /orders/{id}/cancel` 更新** (221-249行)\n   - PENDING / CONFIRMED の両方から CANCELED へ遷移可能に拡張\n   - 在庫復元ロジックは既存維持（一度だけ実行される）\n   - tenant_id フィルタを補完（セキュリティ修正）\n\n### 設計のポイント\n- **遷移テーブル**: `_ALLOWED_TRANSITIONS` を定義済み（将来拡張用）\n- **競合制御**: 全遷移で `with_for_update()` による行ロック\n- **409 INVALID_ORDER_STATE**: 許可されない遷移は全て409を返す\n- **tenant境界**: 既存の `tenant_id` 依存を維持・補完\n- **既存コントラクト**: 既存エンドポイントの応答形式・動作は変更なし\n\n### チェック結果\n- `syntax`: pass\n- `compose-config`: pass",
+    "turns": 9,
+    "last_prompt_tokens": 15039,
+    "prompt_tokens": 75250,
+    "completion_tokens": 2405,
+    "duration_seconds": 154.434
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 100,
+  "code_health_score": 100.0
+}

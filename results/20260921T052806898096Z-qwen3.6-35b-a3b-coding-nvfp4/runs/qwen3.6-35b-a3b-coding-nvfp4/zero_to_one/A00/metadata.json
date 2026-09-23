@@ -1,0 +1,30 @@
+{
+  "model": "qwen3.6:35b-a3b-coding-nvfp4",
+  "track": "zero_to_one",
+  "task": "A00",
+  "started_at": "2026-09-21T05:33:03.328054+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "off",
+    "context_window": 32768,
+    "max_output_tokens": 8192,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 24576,
+    "max_no_tool_turns": 3,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "max_turns",
+    "error": null,
+    "summary": "",
+    "turns": 40,
+    "last_prompt_tokens": 10144,
+    "prompt_tokens": 297636,
+    "completion_tokens": 6489,
+    "duration_seconds": 220.767
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 0,
+  "code_health_score": 70.0
+}

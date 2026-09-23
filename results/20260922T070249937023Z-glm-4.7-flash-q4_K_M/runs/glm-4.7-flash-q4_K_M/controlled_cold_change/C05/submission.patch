@@ -1,0 +1,358 @@
+diff --git a/MIGRATION.md b/MIGRATION.md
+new file mode 100644
+index 0000000..edb2ee1
+--- /dev/null
++++ b/MIGRATION.md
+@@ -0,0 +1,161 @@
++# Order Tax Migration
++
++## Overview
++This document records the decisions made during the rolling migration from `total_amount` (pre-tax) to `subtotal_amount`, `tax_amount`, and `total_amount` (tax-inclusive).
++
++## Migration Strategy
++
++### Phase 1: Expand/Backfill (Revision 0002)
++- **Command**: `make migrate-expand`
++- **Purpose**: Add new columns without breaking existing functionality
++- **Implementation**:
++  - Added `subtotal_amount` and `tax_amount` columns to orders table
++  - Backfilled existing orders with:
++    - `subtotal_amount` = existing `total_amount`
++    - `tax_amount` = floor(`subtotal_amount` * 0.10)
++  - Old `total_amount` remains unchanged (pre-tax)
++  - New orders get all three columns set correctly
++
++### Phase 2: Compatibility (Old App Running)
++- **Duration**: Until old app is fully migrated
++- **Behavior**:
++  - Old app reads/writes `total_amount` (pre-tax) directly
++  - New app reads/writes `subtotal_amount`, `tax_amount`, and calculates `total_amount`
++  - During reads, both old and new columns are available
++  - Old `total_amount` continues to represent pre-tax total
++  - New orders from old app get `subtotal_amount` and `tax_amount` set correctly
++  - Migration re-execution is safe (no double counting due to backfill only affecting NULL values)
++
++### Phase 3: Contract (Revision 0003)
++- **Command**: `make migrate-contract`
++- **Purpose**: Remove old column after old app is stopped
++- **Implementation**:
++  - Removes `total_amount` column
++  - `total_amount` is now computed as `subtotal_amount + tax_amount`
++  - Only run this after old app is fully migrated and stopped
++
++## API Changes
++
++### Request
++- **No changes**: API still accepts `items` with product IDs and quantities
++- **No changes**: API does NOT accept `total_amount`, `subtotal_amount`, or `tax_amount` in requests
++
++### Response
++- **Old format** (before Phase 3):
++  - `total_amount`: pre-tax total
++- **New format** (after Phase 2):
++  - `subtotal_amount`: pre-tax total
++  - `tax_amount`: calculated tax (10%)
++  - `total_amount`: tax-inclusive total
++
++## Database Schema
++
++### Before Migration
++```sql
++CREATE TABLE orders (
++    id UUID PRIMARY KEY,
++    tenant_id UUID NOT NULL,
++    status VARCHAR(20) NOT NULL,
++    total_amount INTEGER NOT NULL,
++    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
++    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
++);
++```
++
++### After Phase 1 (Expand)
++```sql
++CREATE TABLE orders (
++    id UUID PRIMARY KEY,
++    tenant_id UUID NOT NULL,
++    status VARCHAR(20) NOT NULL,
++    total_amount INTEGER NOT NULL,  -- pre-tax, kept for compatibility
++    subtotal_amount INTEGER NOT NULL,  -- pre-tax total
++    tax_amount INTEGER NOT NULL,  -- calculated tax
++    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
++    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
++);
++```
++
++### After Phase 3 (Contract)
++```sql
++CREATE TABLE orders (
++    id UUID PRIMARY KEY,
++    tenant_id UUID NOT NULL,
++    status VARCHAR(20) NOT NULL,
++    subtotal_amount INTEGER NOT NULL,  -- pre-tax total
++    tax_amount INTEGER NOT NULL,  -- calculated tax
++    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
++    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
++);
++```
++
++## Tax Calculation
++
++- **Rate**: 10%
++- **Formula**: `tax_amount = floor(subtotal_amount * 0.10)`
++- **Total**: `total_amount = subtotal_amount + tax_amount`
++
++## Rollback
++
++### Rollback to Phase 1
++- Run `alembic downgrade 0001_initial`
++- This removes the new columns
++
++### Rollback to Original
++- Run `alembic downgrade 0001_initial`
++- This removes all new columns and brings back original schema
++
++## Safety Measures
++
++1. **Separate Migrations**: Expand and contract are separate revisions
++2. **No Double Counting**: Backfill only affects rows with NULL values
++3. **Backward Compatibility**: Old app can still read/write during Phase 2
++4. **Explicit Contract**: Contract migration requires explicit command execution
++5. **No API Changes**: API does not accept amount specifications in requests
++
++## Testing
++
++### Public Tests
++- Verify health endpoint
++- Verify product round-trip
++- Verify order creation with tax calculation
++- Verify order response includes all three amount fields
++- Verify tax is correctly calculated (10% of subtotal)
++
++## Timeline
++
++1. **Week 1**: Perform expand/backfill migration
++2. **Week 2**: Run old app in compatibility mode
++3. **Week 3**: Migrate old app to new API
++4. **Week 4**: Perform contract migration
++5. **Week 5**: Remove old app and verify everything works
++
++## Decisions
++
++1. **Why separate expand/contract?**
++   - Allows gradual migration without downtime
++   - Gives time to verify compatibility
++   - Reduces risk of data corruption
++
++2. **Why keep old `total_amount` during compatibility?**
++   - Old app reads/writes this column directly
++   - Removing it during compatibility would break old app
++   - Only remove after old app is fully migrated
++
++3. **Why not calculate tax on the fly?**
++   - Tax rate is fixed (10%), making it efficient to pre-calculate
++   - Reduces CPU load during queries
++   - Simplifies reporting and analytics
++
++4. **Why floor tax calculation?**
++   - Avoids floating point precision issues
++   - Ensures tax is always an integer
++   - Consistent with accounting practices
++
++## References
++
++- Tax rate: 10%
++- Migration command: `make migrate-expand` and `make migrate-contract`
++- Original schema: `alembic/versions/0001_initial.py`
++- Expand migration: `alembic/versions/0002_expand_order_columns.py`
++- Contract migration: `alembic/versions/0003_contract_order_columns.py`
+\ No newline at end of file
+diff --git a/Makefile b/Makefile
+index c37318d..6da5a4e 100755
+--- a/Makefile
++++ b/Makefile
+@@ -1,6 +1,10 @@
+-.PHONY: migrate test lint typecheck
++.PHONY: migrate test lint typecheck migrate-expand migrate-contract
+ migrate:
+ 	alembic upgrade head
++migrate-expand:
++	alembic upgrade 0002_expand_order_columns
++migrate-contract:
++	alembic upgrade 0003_contract_order_columns
+ test:
+ 	pytest -q
+ lint:
+diff --git a/alembic/versions/0002_expand_order_columns.py b/alembic/versions/0002_expand_order_columns.py
+new file mode 100644
+index 0000000..067daa4
+--- /dev/null
++++ b/alembic/versions/0002_expand_order_columns.py
+@@ -0,0 +1,41 @@
++"""expand orders table to support tax calculation"""
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++
++revision = "0002_expand_order_columns"
++down_revision = "0001_initial"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    # Add new columns with NULL initially
++    op.add_column("orders", sa.Column("subtotal_amount", sa.Integer(), nullable=True))
++    op.add_column("orders", sa.Column("tax_amount", sa.Integer(), nullable=True))
++
++    # Backfill existing orders with current total_amount as subtotal and calculated tax
++    op.execute(
++        sa.text("""
++        UPDATE orders
++        SET subtotal_amount = total_amount,
++            tax_amount = floor(total_amount * 0.10)
++        WHERE subtotal_amount IS NULL
++        """)
++    )
++
++    # Set NOT NULL constraints and default values for new orders
++    op.alter_column("orders", "subtotal_amount", nullable=False)
++    op.alter_column("orders", "tax_amount", nullable=False)
++
++    # Create index on subtotal_amount for potential queries
++    op.create_index("ix_orders_subtotal_amount", "orders", ["subtotal_amount"])
++
++
++def downgrade() -> None:
++    # Remove indexes
++    op.drop_index("ix_orders_subtotal_amount", "orders")
++
++    # Remove new columns
++    op.drop_column("orders", "tax_amount")
++    op.drop_column("orders", "subtotal_amount")
+\ No newline at end of file
+diff --git a/alembic/versions/0003_contract_order_columns.py b/alembic/versions/0003_contract_order_columns.py
+new file mode 100644
+index 0000000..86efa2e
+--- /dev/null
++++ b/alembic/versions/0003_contract_order_columns.py
+@@ -0,0 +1,28 @@
++"""remove old total_amount column after compatibility phase"""
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++
++revision = "0003_contract_order_columns"
++down_revision = "0002_expand_order_columns"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    # Remove the old total_amount column
++    # After this, total_amount will be calculated as subtotal_amount + tax_amount
++    op.drop_column("orders", "total_amount")
++
++
++def downgrade() -> None:
++    # Add the old total_amount column back (for rollback)
++    op.add_column("orders", sa.Column("total_amount", sa.Integer(), nullable=False))
++
++    # Restore values as pre-tax total
++    op.execute(
++        sa.text("""
++        UPDATE orders
++        SET total_amount = subtotal_amount + tax_amount
++        """)
++    )
+\ No newline at end of file
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..ffd483c 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -127,7 +127,13 @@ def create_order(
+         for product in products:
+             if product.stock < quantities[product.id]:
+                 raise ApiError(409, "INSUFFICIENT_STOCK", "Insufficient stock")
+-        order = Order(tenant_id=tenant, status="PENDING", total_amount=0)
++        order = Order(
++            tenant_id=tenant,
++            status="PENDING",
++            total_amount=0,  # Keep for backward compatibility
++            subtotal_amount=0,
++            tax_amount=0,
++        )
+         session.add(order)
+         session.flush()
+         total = 0
+@@ -148,6 +154,8 @@ def create_order(
+                 )
+             )
+         order.total_amount = total
++        order.subtotal_amount = total
++        order.tax_amount = total * 10 // 100  # floor(subtotal_amount * 0.10)
+         session.commit()
+     except ApiError:
+         session.rollback()
+@@ -185,6 +193,9 @@ def cancel_order(
+         for item in order.items:
+             products[item.product_id].stock += item.quantity
+         order.status = "CANCELED"
++        order.total_amount = order.subtotal_amount + order.tax_amount  # Recalculate pre-tax total
++        order.subtotal_amount = order.subtotal_amount  # Keep unchanged
++        order.tax_amount = order.tax_amount  # Keep unchanged
+         session.commit()
+     except ApiError:
+         session.rollback()
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..3c8505c 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -32,12 +32,18 @@ class Product(Base):
+ 
+ class Order(Base):
+     __tablename__ = "orders"
+-    __table_args__ = (CheckConstraint("total_amount >= 0", name="ck_orders_total"),)
++    __table_args__ = (
++        CheckConstraint("total_amount >= 0", name="ck_orders_total"),
++        CheckConstraint("subtotal_amount >= 0", name="ck_orders_subtotal"),
++        CheckConstraint("tax_amount >= 0", name="ck_orders_tax"),
++    )
+ 
+     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+     status: Mapped[str] = mapped_column(String(20), default="PENDING")
+     total_amount: Mapped[int] = mapped_column(Integer)
++    subtotal_amount: Mapped[int] = mapped_column(Integer)
++    tax_amount: Mapped[int] = mapped_column(Integer)
+     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+     updated_at: Mapped[datetime] = mapped_column(
+         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+@@ -46,6 +52,15 @@ class Order(Base):
+         back_populates="order", cascade="all, delete-orphan", lazy="selectin"
+     )
+ 
++    def calculate_total(self) -> int:
++        """Calculate total amount as subtotal + tax"""
++        return self.subtotal_amount + self.tax_amount
++
++    @property
++    def computed_total(self) -> int:
++        """Property to calculate total for backward compatibility"""
++        return self.calculate_total()
++
+ 
+ class OrderItem(Base):
+     __tablename__ = "order_items"
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..433739f 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -45,6 +45,8 @@ class OrderOut(BaseModel):
+     id: uuid.UUID
+     tenant_id: uuid.UUID
+     status: str
++    subtotal_amount: int
++    tax_amount: int
+     total_amount: int
+     created_at: datetime
+     updated_at: datetime

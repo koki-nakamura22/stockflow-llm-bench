@@ -1,0 +1,81 @@
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..927e224 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -173,7 +173,7 @@ def cancel_order(
+ ) -> Order:
+     try:
+         order = load_order(session, tenant, order_id, lock=True)
+-        if order.status != "PENDING":
++        if order.status not in (Order.PENDING, Order.CONFIRMED):
+             raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be canceled")
+         product_ids = sorted((item.product_id for item in order.items), key=str)
+         products = {
+@@ -184,10 +184,48 @@ def cancel_order(
+         }
+         for item in order.items:
+             products[item.product_id].stock += item.quantity
+-        order.status = "CANCELED"
++        order.status = Order.CANCELED
+         session.commit()
+     except ApiError:
+         session.rollback()
+         raise
+     session.expire_all()
+     return load_order(session, tenant, order.id)
++
++
++@app.post("/orders/{order_id}/confirm", response_model=OrderOut)
++def confirm_order(
++    order_id: uuid.UUID,
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> Order:
++    try:
++        order = load_order(session, tenant, order_id, lock=True)
++        if order.status != Order.PENDING:
++            raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be confirmed")
++        order.status = Order.CONFIRMED
++        session.commit()
++    except ApiError:
++        session.rollback()
++        raise
++    session.expire_all()
++    return load_order(session, tenant, order.id)
++
++
++@app.post("/orders/{order_id}/ship", response_model=OrderOut)
++def ship_order(
++    order_id: uuid.UUID,
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> Order:
++    try:
++        order = load_order(session, tenant, order_id, lock=True)
++        if order.status != Order.CONFIRMED:
++            raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be shipped")
++        order.status = Order.SHIPPED
++        session.commit()
++    except ApiError:
++        session.rollback()
++        raise
++    session.expire_all()
++    return load_order(session, tenant, order.id)
+\ No newline at end of file
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..a83e0f9 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -46,6 +46,12 @@ class Order(Base):
+         back_populates="order", cascade="all, delete-orphan", lazy="selectin"
+     )
+ 
++    # Order status constants
++    PENDING = "PENDING"
++    CONFIRMED = "CONFIRMED"
++    SHIPPED = "SHIPPED"
++    CANCELED = "CANCELED"
++
+ 
+ class OrderItem(Base):
+     __tablename__ = "order_items"

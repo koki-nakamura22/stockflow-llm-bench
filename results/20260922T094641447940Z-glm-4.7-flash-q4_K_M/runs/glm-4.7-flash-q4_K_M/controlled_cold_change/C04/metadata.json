@@ -1,0 +1,35 @@
+{
+  "model": "glm-4.7-flash:q4_K_M",
+  "track": "controlled_cold_change",
+  "task": "C04",
+  "started_at": "2026-09-22T12:02:15.050595+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.7,
+      "top_p": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 2400,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "transactional outboxを実装しました。Outboxモデルを追加し、create_orderとcancel_orderで同じトランザクションでイベントエントリを作成。run_outbox_worker_onceでEVENT_PUBLISH_URLへJSON POSTし、skip_locked=Trueで同時競合を防ぎます。",
+    "turns": 23,
+    "last_prompt_tokens": 21676,
+    "prompt_tokens": 259221,
+    "completion_tokens": 8238,
+    "duration_seconds": 1204.153
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 0,
+  "code_health_score": 100.0
+}

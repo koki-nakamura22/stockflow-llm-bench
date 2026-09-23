@@ -1,0 +1,37 @@
+{
+  "model": "qwen3-coder:30b-a3b-q4_K_M",
+  "track": "controlled_cold_change",
+  "task": "C03",
+  "started_at": "2026-09-22T03:58:08.042851+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "off",
+    "sampling": {
+      "temperature": 0.7,
+      "top_p": 0.8,
+      "top_k": 20,
+      "repeat_penalty": 1.05
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "C03: 注文状態遷移を実装しました。以下の機能を追加・修正しました：\n\n1. 新しいエンドポイントを追加：\n   - `POST /orders/{id}/confirm`: PENDING -> CONFIRMED\n   - `POST /orders/{id}/ship`: CONFIRMED -> SHIPPED\n\n2. 既存のcancelエンドポイントを修正：\n   - PENDINGおよびCONFIRMED状態からCANCELEDへの遷移を許可\n   - 在庫復元はPENDING状態からのみ行う（CONFIRMED状態では在庫不変）\n\n3. 状態遷移のバリデーションを実装：\n   - 有効な遷移のみを許可し、それ以外は409 `INVALID_ORDER_STATE`を返す\n   - 競合操作でも許可された遷移だけが一度成立するようにロック処理を実装\n\n4. tenant境界と既存contractを壊さないよう実装：\n   - すべての操作でtenant_idを検証し、適切なアクセス制御を実装\n\nコードはsyntaxとcompose-configのチェックを通過しており、指定された要件を満たしています。",
+    "turns": 10,
+    "last_prompt_tokens": 8912,
+    "prompt_tokens": 49456,
+    "completion_tokens": 2151,
+    "duration_seconds": 150.38
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 75,
+  "code_health_score": 100.0
+}

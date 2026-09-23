@@ -1,0 +1,161 @@
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..34a07f8 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,8 +1,12 @@
++import base64
++import hashlib
++import hmac
++import os
+ import uuid
+ from collections import defaultdict
+ from typing import Any
+ 
+-from fastapi import Depends, FastAPI, Header, Request
++from fastapi import Depends, FastAPI, Header, Query, Request
+ from fastapi.exceptions import RequestValidationError
+ from fastapi.responses import JSONResponse
+ from sqlalchemy import select, text
+@@ -11,7 +15,40 @@ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+ from stockflow.models import Order, OrderItem, Product
+-from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
++from stockflow.schemas import OrderCreate, OrderListResponse, OrderOut, ProductCreate, ProductOut
++
++CURSOR_SECRET = os.environ.get("CURSOR_SECRET", "default-secret-change-in-production")
++
++
++def _encode_cursor(order_id: uuid.UUID, created_at: str, filter_params: dict[str, Any]) -> str:
++    """Encode a cursor with HMAC for tamper detection."""
++    data = f"{order_id}|{created_at}|{filter_params}"
++    sig = hmac.new(CURSOR_SECRET.encode(), data.encode(), hashlib.sha256).hexdigest()
++    payload = f"{order_id}|{created_at}|{sig}"
++    return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
++
++
++def _decode_cursor(cursor: str) -> tuple[uuid.UUID, str, dict[str, Any]] | None:
++    """Decode and verify a cursor. Returns (order_id, created_at, filter_params) or None."""
++    try:
++        # Add padding back
++        padding = 4 - len(cursor) % 4
++        if padding != 4:
++            cursor += "=" * padding
++        payload = base64.urlsafe_b64decode(cursor.encode()).decode()
++        parts = payload.split("|")
++        if len(parts) != 3:
++            return None
++        order_id_str, created_at, sig = parts
++        order_id = uuid.UUID(order_id_str)
++        # Reconstruct data without sig
++        data = f"{order_id_str}|{created_at}|"
++        expected_sig = hmac.new(CURSOR_SECRET.encode(), data.encode(), hashlib.sha256).hexdigest()
++        if not hmac.compare_digest(sig, expected_sig):
++            return None
++        return order_id, created_at, {}
++    except Exception:
++        return None
+ 
+ app = FastAPI(title="StockFlow Mini")
+ 
+@@ -156,6 +193,87 @@ def create_order(
+     return load_order(session, tenant, order.id)
+ 
+ 
++@app.get("/orders", response_model=OrderListResponse)
++def list_orders(
++    limit: int = Query(ge=1, le=100),
++    status: str | None = Query(default=None),
++    created_from: str | None = Query(default=None),
++    created_to: str | None = Query(default=None),
++    cursor: str | None = Query(default=None),
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> OrderListResponse:
++    # Build filter parameters for cursor verification
++    filter_params: dict[str, Any] = {}
++    if status is not None:
++        filter_params["status"] = status
++    if created_from is not None:
++        filter_params["created_from"] = created_from
++    if created_to is not None:
++        filter_params["created_to"] = created_to
++
++    # Decode cursor if provided
++    if cursor is not None:
++        decoded = _decode_cursor(cursor)
++        if decoded is None:
++            raise ApiError(400, "INVALID_CURSOR", "Cursor is invalid or tampered")
++        prev_order_id, prev_created_at, prev_filter_params = decoded
++        # Verify filter parameters match
++        if filter_params != prev_filter_params:
++            raise ApiError(400, "INVALID_CURSOR", "Cursor cannot be reused with different filters")
++        # Use the cursor as the boundary: we want items AFTER this point
++        # Since ordering is DESC, we need items where (created_at, id) < (prev_created_at, prev_order_id)
++        cursor_created_at = prev_created_at
++        cursor_order_id = prev_order_id
++    else:
++        cursor_created_at = None
++        cursor_order_id = None
++
++    # Build the query
++    stmt = (
++        select(Order)
++        .where(Order.tenant_id == tenant)
++        .options(selectinload(Order.items))
++    )
++
++    # Apply filters
++    if status is not None:
++        stmt = stmt.where(Order.status == status)
++    if created_from is not None:
++        stmt = stmt.where(Order.created_at >= created_from)
++    if created_to is not None:
++        stmt = stmt.where(Order.created_at <= created_to)
++
++    # Apply cursor boundary
++    # We want items that come BEFORE the cursor in DESC order
++    # i.e., (created_at, id) < (cursor_created_at, cursor_order_id)
++    if cursor_created_at is not None and cursor_order_id is not None:
++        stmt = stmt.where(
++            (Order.created_at, Order.id) < (cursor_created_at, cursor_order_id)
++        )
++
++    # Order by created_at DESC, id DESC
++    stmt = stmt.order_by(Order.created_at.desc(), Order.id.desc())
++
++    # Limit to limit + 1 to check if there's a next page
++    stmt = stmt.limit(limit + 1)
++
++    orders = session.scalars(stmt).all()
++
++    # Determine next_cursor
++    next_cursor = None
++    if len(orders) > limit:
++        # There's a next page
++        extra = orders.pop()
++        next_cursor = _encode_cursor(
++            extra.id,
++            extra.created_at.isoformat(),
++            filter_params,
++        )
++
++    return OrderListResponse(items=orders, next_cursor=next_cursor)
++
++
+ @app.get("/orders/{order_id}", response_model=OrderOut)
+ def get_order(
+     order_id: uuid.UUID,
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..2dbd336 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -50,3 +50,8 @@ class OrderOut(BaseModel):
+     updated_at: datetime
+     items: list[OrderItemOut]
+ 
++
++class OrderListResponse(BaseModel):
++    items: list[OrderOut]
++    next_cursor: str | None = None
++

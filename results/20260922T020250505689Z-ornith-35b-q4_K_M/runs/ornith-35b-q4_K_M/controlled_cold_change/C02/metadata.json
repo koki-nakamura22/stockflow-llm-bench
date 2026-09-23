@@ -1,0 +1,36 @@
+{
+  "model": "ornith:35b-q4_K_M",
+  "track": "controlled_cold_change",
+  "task": "C02",
+  "started_at": "2026-09-22T02:52:18.137289+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "Implemented idempotency key support for `POST /orders`:\n\n**Migration** (`alembic/versions/0002_idempotency_keys.py`):\n- Created `idempotency_keys` table with columns: tenant_id, endpoint, idempotency_key, request_hash, status (PENDING/SUCCESS/FAILURE), order_id, result_status, result_body, timestamps.\n- Unique constraint on `(tenant_id, endpoint, idempotency_key)` for scope isolation.\n\n**Model** (`stockflow/models.py`):\n- Added `IdempotencyKey` ORM model matching the migration.\n\n**Endpoint** (`stockflow/main.py`):\n- Added `Idempotency-Key` header dependency (required, ASCII 1-128 chars).\n- Request body normalization (sorted items by product_id, canonical JSON) with SHA-256 hashing for conflict detection.\n- `SELECT ... FOR UPDATE` on idempotency record for concurrency control (serializes same-key access).\n- Cache hit on SUCCESS → re-fetches original order by stored `order_id`, returns 201 without re-deducting stock.\n- Same key + different normalized body → 409 `IDEMPOTENCY_CONFLICT`.\n- Success → stores `order_id` and result JSON in idempotency record.\n- Failure (validation/stock/rollback) → marks record as FAILURE, not recorded as success; allows retry with same key.\n- Scope includes `tenant_id`, so different tenants can use the same key value.\n\nChecks run: syntax ✅, compose-config ✅, public-tests (connection refused — expected, requires live server).",
+    "turns": 31,
+    "last_prompt_tokens": 35865,
+    "prompt_tokens": 561030,
+    "completion_tokens": 16997,
+    "duration_seconds": 906.444
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 9,
+  "code_health_score": 85.0
+}

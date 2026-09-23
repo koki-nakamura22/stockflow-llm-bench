@@ -1,0 +1,155 @@
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..e162bb8 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,6 +1,6 @@
+ import uuid
+ from collections import defaultdict
+-from typing import Any
++from typing import Any, Optional
+ 
+ from fastapi import Depends, FastAPI, Header, Request
+ from fastapi.exceptions import RequestValidationError
+@@ -13,7 +13,15 @@ from stockflow.db import get_session
+ from stockflow.models import Order, OrderItem, Product
+ from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
+ 
++import os
++import hmac
++import hashlib
++import base64
++import json
++from datetime import datetime
++
+ app = FastAPI(title="StockFlow Mini")
++CURSOR_SECRET = os.getenv("CURSOR_SECRET", "default-secret")
+ 
+ 
+ class ApiError(Exception):
+@@ -52,6 +60,74 @@ def tenant_id(x_tenant_id: str | None = Header(default=None)) -> uuid.UUID:
+         raise ApiError(400, "INVALID_TENANT", "X-Tenant-Id must be a UUID") from exc
+ 
+ 
++# Cursor utilities
++
++def _encode_cursor(
++    created_at: datetime,
++    order_id: uuid.UUID,
++    status: Optional[str],
++    created_from: Optional[datetime],
++    created_to: Optional[datetime],
++) -> str:
++    payload = {
++        "created_at": created_at.isoformat(),
++        "order_id": str(order_id),
++        "status": status,
++        "created_from": created_from.isoformat() if created_from else None,
++        "created_to": created_to.isoformat() if created_to else None,
++    }
++    payload_bytes = json.dumps(payload, separators=(',', ':')).encode()
++    signature = hmac.new(CURSOR_SECRET.encode(), payload_bytes, hashlib.sha256).hexdigest().encode()
++    token = base64.urlsafe_b64encode(payload_bytes + b"." + signature).decode()
++    return token
++
++
++def _decode_cursor(token: str) -> dict:
++    try:
++        decoded = base64.urlsafe_b64decode(token.encode())
++        payload_bytes, signature = decoded.rsplit(b".", 1)
++        expected_sig = hmac.new(CURSOR_SECRET.encode(), payload_bytes, hashlib.sha256).hexdigest().encode()
++        if not hmac.compare_digest(signature, expected_sig):
++            raise ValueError("Invalid signature")
++        payload = json.loads(payload_bytes.decode())
++        # Convert datetime strings back
++        payload["created_at"] = datetime.fromisoformat(payload["created_at"]) if payload["created_at"] else None
++        payload["created_from"] = datetime.fromisoformat(payload["created_from"]) if payload["created_from"] else None
++        payload["created_to"] = datetime.fromisoformat(payload["created_to"]) if payload["created_to"] else None
++        payload["order_id"] = uuid.UUID(payload["order_id"]) if payload["order_id"] else None
++        return payload
++    except Exception as exc:
++        raise ApiError(400, "INVALID_CURSOR", "Invalid cursor") from exc
++
++
++# Helper to build filter conditions
++
++def _apply_filters(stmt, tenant: uuid.UUID, status: Optional[str], created_from: Optional[datetime], created_to: Optional[datetime]):
++    stmt = stmt.where(Order.tenant_id == tenant)
++    if status:
++        stmt = stmt.where(Order.status == status)
++    if created_from:
++        stmt = stmt.where(Order.created_at >= created_from)
++    if created_to:
++        stmt = stmt.where(Order.created_at <= created_to)
++    return stmt
++
++
++# Helper to apply cursor pagination
++
++def _apply_cursor(stmt, cursor_data: dict):
++    created_at = cursor_data["created_at"]
++    order_id = cursor_data["order_id"]
++    # For DESC order, we need rows where (created_at, id) < (cursor_created_at, cursor_id)
++    stmt = stmt.where(
++        (Order.created_at < created_at) |
++        ((Order.created_at == created_at) & (Order.id < order_id))
++    )
++    return stmt
++
++
++# Load order helper
++
+ def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: bool = False) -> Order:
+     stmt = (
+         select(Order)
+@@ -191,3 +267,51 @@ def cancel_order(
+         raise
+     session.expire_all()
+     return load_order(session, tenant, order.id)
++
++
++# New endpoint: GET /orders with cursor pagination
++@app.get("/orders")
++def list_orders(
++    limit: int,
++    status: Optional[str] = None,
++    created_from: Optional[datetime] = None,
++    created_to: Optional[datetime] = None,
++    cursor: Optional[str] = None,
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++):
++    # Validate limit
++    if limit < 1 or limit > 100:
++        raise ApiError(400, "INVALID_LIMIT", "limit must be between 1 and 100")
++
++    # Base query
++    stmt = select(Order).options(selectinload(Order.items))
++    stmt = _apply_filters(stmt, tenant, status, created_from, created_to)
++    stmt = stmt.order_by(Order.created_at.desc(), Order.id.desc())
++
++    # Handle cursor
++    if cursor:
++        cursor_data = _decode_cursor(cursor)
++        # Ensure filter consistency
++        if cursor_data["status"] != status or cursor_data["created_from"] != created_from or cursor_data["created_to"] != created_to:
++            raise ApiError(400, "INVALID_CURSOR", "Cursor does not match filters")
++        stmt = _apply_cursor(stmt, cursor_data)
++
++    # Fetch limit+1 to determine next page
++    stmt = stmt.limit(limit + 1)
++    orders = session.scalars(stmt).all()
++
++    items = [OrderOut.model_validate(order, from_attributes=True) for order in orders[:limit]]
++    next_cursor = None
++    if len(orders) > limit:
++        last_order = orders[limit - 1]
++        next_cursor = _encode_cursor(
++            created_at=last_order.created_at,
++            order_id=last_order.id,
++            status=status,
++            created_from=created_from,
++            created_to=created_to,
++        )
++
++    return {"items": items, "next_cursor": next_cursor}
++

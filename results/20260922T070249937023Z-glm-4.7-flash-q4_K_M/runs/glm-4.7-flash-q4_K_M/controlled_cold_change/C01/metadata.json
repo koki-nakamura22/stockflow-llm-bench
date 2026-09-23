@@ -1,0 +1,35 @@
+{
+  "model": "glm-4.7-flash:q4_K_M",
+  "track": "controlled_cold_change",
+  "task": "C01",
+  "started_at": "2026-09-22T07:35:14.530502+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.7,
+      "top_p": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "`GET /orders` エンドポイントを実装しました。\n\n- 必須パラメータ: `limit` (1〜100)\n- 任意パラメータ: `status`, `created_from`, `created_to`, `cursor`\n- ソート順: `created_at DESC, id DESC`\n- レスポンス: `{\"items\": [...], \"next_cursor\": \"string or null\"}`\n- cursorはopaqueで改ざん検知可能（`CURSOR_SECRET` 署名付き）\n- 無効なcursorは400 `INVALID_CURSOR` を返す\n- tenant境界を維持\n- 既存contractを破壊しない\n\nシンタックスチェックとコンフィグチェックは成功しています。",
+    "turns": 38,
+    "last_prompt_tokens": 30884,
+    "prompt_tokens": 554474,
+    "completion_tokens": 7765,
+    "duration_seconds": 1784.355
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 0,
+  "code_health_score": 100.0
+}

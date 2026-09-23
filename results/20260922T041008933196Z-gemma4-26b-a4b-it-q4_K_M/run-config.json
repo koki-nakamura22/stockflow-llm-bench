@@ -1,0 +1,17 @@
+{
+  "model": "gemma4:26b-a4b-it-q4_K_M",
+  "adapter": "ollama",
+  "think": "on",
+  "sampling": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 64
+  },
+  "context_window": 65536,
+  "max_output_tokens": 24576,
+  "request_timeout_seconds": 1200,
+  "context_guard_tokens": 40960,
+  "max_no_tool_turns": 3,
+  "max_repeated_calls": 8,
+  "max_turns": 40
+}

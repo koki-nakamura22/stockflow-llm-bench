@@ -1,0 +1,36 @@
+{
+  "model": "gemma4:26b-a4b-it-q4_K_M",
+  "track": "controlled_cold_change",
+  "task": "C01",
+  "started_at": "2026-09-22T04:41:53.622242+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 64
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "max_turns",
+    "error": null,
+    "summary": "",
+    "turns": 40,
+    "last_prompt_tokens": 28795,
+    "prompt_tokens": 661193,
+    "completion_tokens": 13059,
+    "duration_seconds": 768.028
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 25,
+  "code_health_score": 100.0
+}

@@ -1,0 +1,35 @@
+{
+  "model": "north-mini-code-1.0:latest",
+  "track": "controlled_cold_change",
+  "task": "C05",
+  "started_at": "2026-09-21T16:11:04.461726+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 1.0,
+      "top_p": 0.95
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "context_exceeded",
+    "error": null,
+    "summary": "",
+    "turns": 33,
+    "last_prompt_tokens": 39240,
+    "prompt_tokens": 666500,
+    "completion_tokens": 29206,
+    "duration_seconds": 1997.096
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "error",
+  "capability_score": 0,
+  "code_health_score": 100.0
+}

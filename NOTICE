@@ -1,0 +1,63 @@
+StockFlow Local LLM Benchmark
+Copyright 2026 Koki NAKAMURA
+
+このリポジトリは 2 つのライセンスで構成される。
+
+- コード(bench/ evaluator/ scripts/ tests/ public-tests/ reference/ platform-skeleton/ config/)
+  … Apache License 2.0 (LICENSE)
+- 計測データとドキュメント(results/ および各 *.md)
+  … Creative Commons Attribution 4.0 International (LICENSE-DATA)
+
+--------------------------------------------------------------------------------
+results/ に含まれるモデル出力について
+--------------------------------------------------------------------------------
+
+results/ 以下には、ベンチマーク対象のローカル LLM が生成したコード
+(workspace/ および submission.patch)と会話ログ(transcript.jsonl)が含まれる。
+モデルの重み(weights)は同梱していない。
+
+各モデルのライセンスは次のとおり(2026-09-23 時点。`ollama show --license` で
+実際に配布されている本文を確認。* は Ollama 側の license blob が空のため
+ベンダー公式で確認したもの)。
+
+  Apache License 2.0
+    gpt-oss:20b
+    qwen3.6:35b-a3b / qwen3.6:35b-a3b-coding-nvfp4
+    qwen3-coder:30b-a3b
+    qwen3.8:27b
+    north-mini-code-1.0
+    gemma4:26b-a4b-it
+    muse-glimmer:30b *
+    devstral-small-2:24b-instruct-2512 *
+
+  MIT License
+    glm-4.7-flash
+    ornith:35b
+
+  NVIDIA Open Model License Agreement
+    nemotron-3.5-lightning:30b-a3b
+
+  OpenMDW License Agreement v1.1
+    laguna-xs-2.1
+
+上記のいずれも、(a) ベンチマーク結果の公表を制限する条項を持たず、
+(b) モデル出力に対する権利を主張していない。該当箇所の原文:
+
+  NVIDIA Open Model License Agreement:
+    "NVIDIA claims no ownership rights in outputs. You are responsible for
+     outputs and their subsequent uses."
+
+  OpenMDW-1.1:
+    "This agreement does not impose any restrictions or obligations with
+     respect to any use, modification, or sharing of any outputs generated
+     by using the Model Materials."
+
+Apache License 2.0 および MIT License は、モデル出力について規定していない。
+
+--------------------------------------------------------------------------------
+第三者ソフトウェア
+--------------------------------------------------------------------------------
+
+reference/base/ と platform-skeleton/ は FastAPI / SQLAlchemy / Alembic /
+psycopg / pytest に依存するが、いずれもソースを同梱しておらず(実行時に取得)、
+本リポジトリの配布に追加の帰属表示義務は発生しない。

@@ -1,0 +1,7 @@
+model,track,task,evaluator_status,capability_score,code_health_score,agent_status,turns,prompt_tokens,completion_tokens,duration_seconds,public_tests_unchanged,run_dir
+gpt-oss:20b,zero_to_one,A00,completed,0,100.0,max_turns,40,293962,10906,630.636,True,./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/zero_to_one/A00
+gpt-oss:20b,controlled_cold_change,C01,completed,100,90.0,context_exceeded,38,792273,26052,1691.12,True,./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/controlled_cold_change/C01
+gpt-oss:20b,controlled_cold_change,C02,error,0,90.0,max_turns,40,577704,19491,1176.258,True,./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/controlled_cold_change/C02
+gpt-oss:20b,controlled_cold_change,C03,completed,100,100.0,max_turns,40,427011,10074,601.239,True,./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/controlled_cold_change/C03
+gpt-oss:20b,controlled_cold_change,C04,completed,25,100.0,model_error,8,15465,811,157.944,True,./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/controlled_cold_change/C04
+gpt-oss:20b,controlled_cold_change,C05,error,0,70.0,max_turns,40,630775,15538,928.321,True,./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/controlled_cold_change/C05

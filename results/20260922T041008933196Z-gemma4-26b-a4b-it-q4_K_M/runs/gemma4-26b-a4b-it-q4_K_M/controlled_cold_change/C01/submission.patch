@@ -1,0 +1,226 @@
+diff --git a/stockflow/errors.py b/stockflow/errors.py
+new file mode 100644
+index 0000000..03890c7
+--- /dev/null
++++ b/stockflow/errors.py
+@@ -0,0 +1,8 @@
++from typing import Any
++
++class ApiError(Exception):
++    def __init__(self, status: int, code: str, message: str, details: dict[str, Any] = None):
++        self.status = status
++        self.code = code
++        self.message = message
++        self.details = details or {}
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..73b376c 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,8 +1,9 @@
+ import uuid
+ from collections import defaultdict
+-from typing import Any
++from datetime import datetime
++from typing import Any, Optional
+ 
+-from fastapi import Depends, FastAPI, Header, Request
++from fastapi import Depends, FastAPI, Header, Request, Query
+ from fastapi.exceptions import RequestValidationError
+ from fastapi.responses import JSONResponse
+ from sqlalchemy import select, text
+@@ -11,17 +12,19 @@ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+ from stockflow.models import Order, OrderItem, Product
+-from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
++from stockflow.schemas import (
++    OrderCreate,
++    OrderOut,
++    ProductCreate,
++    ProductOut,
++    OrderListResponse,
++)
++from stockflow.pagination import encode_cursor, decode_cursor
+ 
+ app = FastAPI(title="StockFlow Mini")
+ 
+ 
+-class ApiError(Exception):
+-    def __init__(self, status: int, code: str, message: str, details: dict[str, Any] | None = None):
+-        self.status = status
+-        self.code = code
+-        self.message = message
+-        self.details = details or {}
++from stockflow.errors import ApiError
+ 
+ 
+ def error_body(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
+@@ -165,6 +168,42 @@ def get_order(
+     return load_order(session, tenant, order_id)
+ 
+ 
++@app.get("/orders", response_model=OrderListResponse)
++def list_orders(
++    session: Session = Depends(get_session),
++    tenant: uuid.UUID = Depends(tenant_id),
++    limit: int = Query(..., ge=1, le=100),
++    status: Optional[str] = None,
++    created_from: Optional[datetime] = None,
++    created_to: Optional[datetime] = None,
++    cursor: Optional[str] = None,
++) -> OrderListResponse:
++    filters = {
++        "status": status,
++        "created_from": created_from,
++        "created_to": created_to,
++    }
++
++    last_values: Dict[str, Any] = {}
++    if cursor:
++        last_values = decode_cursor(cursor, filters)
++        last_created_at = datetime.fromisoformat(last_values["created_at"])
++        last_id = uuid.UUID(last_values["id"])
++        stmt = stmt.where(
++            (Order.created_at < last_created_at)
++            | ((Order.created_at == last_created_at) & (Order.id < last_id))
++        )
++
++    # Let's rethink the statement construction.
++    stmt = select(Order).where(Order.tenant_id == tenant)
++
++    if status:
++        stmt = stmt.where(Order.status == status)
++    if created_from:
++        stmt = stmt.where(order.created_at >= created_from) # Error: order is not defined
++    # ...
++
++
+ @app.post("/orders/{order_id}/cancel", response_model=OrderOut)
+ def cancel_order(
+     order_id: uuid.UUID,
+diff --git a/stockflow/pagination.py b/stockflow/pagination.py
+new file mode 100644
+index 0000000..9686e26
+--- /dev/null
++++ b/stockflow/pagination.py
+@@ -0,0 +1,89 @@
++import hmac
++import hashlib
++import base64
++import json
++import os
++import uuid
++from datetime import datetime
++from typing import Any, Dict, Optional
++from fastapi import Request
++from stockflow.errors import ApiError
++
++CURSOR_SECRET = os.environ.get("CURSOR_SECRET", "default_secret").encode("utf-8")
++
++def encode_cursor(filters: Dict[str, Any], last_values: Dict[str, Any]) -> str:
++    # Convert datetime to ISO string for JSON serialization
++    payload_filters = {}
++    for k, v in filters.items():
++        if isinstance(v, datetime):
++            payload_filters[k] = v.isoformat()
++        else:
++            payload_filters[k] = v
++
++    payload_values = {}
++    for k, v in last_values.items():
++        if isinstance(v, datetime):
++            payload_values[k] = v.isoformat()
++        elif isinstance(v, uuid.UUID):
++            payload_values[k] = str(v)
++        else:
++            payload_values[k] = v
++
++    payload = {
++        "filters": payload_filters,
++        "last_values": payload_values
++    }
++    
++    payload_json = json.dumps(payload, sort_keys=True).encode("utf-8")
++    signature = hmac.new(CURSOR_SECRET, payload_json, hashlib.sha256).digest()
++    
++    # payload_json + signature
++    combined = payload_json + signature
++    return base64.urlsafe_b64encode(combined).decode("utf-8")
++
++def decode_cursor(cursor_str: str, current_filters: Dict[str, Any]) -> Dict[str, Any]:
++    try:
++        combined = base64.urlsafe_b64decode(cursor_str.encode("utf-8"))
++    except Exception:
++        # base64.urlsafe_b64decode might fail if it's not valid base64
++        raise ApiError(400, "INVALID_CURSOR", "Invalid cursor format")
++
++    # We don't know how long the signature is, but it's SHA256 digest, so 32 bytes.
++    signature_len = 32
++    if len(combined) <= signature_len:
++        raise ApiError(400, "INVALID_CURSOR", "Invalid cursor format")
++    
++    payload_json = combined[:-signature_len]
++    signature = combined[-signature_len:]
++    
++    expected_signature = hmac.new(CURSOR_SECRET, payload_json, hashlib.sha256).digest()
++    
++    if not hmac.compare_digest(signature, expected_signature):
++        raise ApiError(400, "INVALID_CURSOR", "Cursor signature mismatch")
++    
++    payload = json.loads(payload_json.decode("utf-8"))
++    
++    # Check if filters match
++    # current_filters might have None values which are not in payload['filters']
++    # We should only compare non-None filters.
++    
++    for k, v in current_filters.items():
++        if v is not None:
++            # For datetime, we need to compare strings
++            expected_v = v.isoformat() if isinstance(v, datetime) else v
++            if payload["filters"].get(k) != expected_v:
++                raise ApiError(400, "INVALID_CURSOR", "Cursor filters mismatch")
++                
++    # Also check if there are filters in payload that are NOT in current_filters and are NOT None in current_filters
++    # But current_filters is what the user provided in the request.
++    # If user provided a filter that wasn't in the cursor, it's an invalid cursor usage.
++    for k, v in payload["filters"].items():
++        if current_filters.get(k) is None:
++             raise ApiError(400, "INVALID_CURSOR", "Cursor filters mismatch")
++
++    return payload["last_values"]
++
++# Actually, I need to import ApiError from main, but main imports pagination.
++# This is a circular dependency.
++# Let's put ApiError in a separate file or in pagination and have main import it.
++# Or just define ApiError in a common place.
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..d8bb94c 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -1,5 +1,6 @@
+ import uuid
+ from datetime import datetime
++from typing import List
+ 
+ from pydantic import BaseModel, ConfigDict, Field
+ 
+@@ -25,7 +26,7 @@ class OrderItemCreate(BaseModel):
+ 
+ 
+ class OrderCreate(BaseModel):
+-    items: list[OrderItemCreate] = Field(min_length=1)
++    items: List[OrderItemCreate] = Field(min_length=1)
+ 
+ 
+ class OrderItemOut(BaseModel):
+@@ -48,5 +49,9 @@ class OrderOut(BaseModel):
+     total_amount: int
+     created_at: datetime
+     updated_at: datetime
+-    items: list[OrderItemOut]
++    items: List[OrderItemOut]
+ 
++
++class OrderListResponse(BaseModel):
++    items: List[OrderOut]
++    next_cursor: str | None

@@ -1,0 +1,36 @@
+{
+  "model": "gemma4:26b-a4b-it-q4_K_M",
+  "track": "controlled_cold_change",
+  "task": "C05",
+  "started_at": "2026-09-22T05:51:10.116211+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 64
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "Implemented a rolling migration for order amounts. \n- Added `subtotal_amount` and `tax_amount` to `orders` table and `OrderOut` schema.\n- Implemented `migrate-expand` to add columns and backfill data, maintaining compatibility.\n- Implemented `migrate-contract` to update `total_amount` to be tax-inclusive.\n- Updated `create_order` to populate the new columns.\n- Added `MIGRATION.md` with the migration plan.",
+    "turns": 31,
+    "last_prompt_tokens": 31851,
+    "prompt_tokens": 586273,
+    "completion_tokens": 18302,
+    "duration_seconds": 1108.591
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 100,
+  "code_health_score": 100.0
+}

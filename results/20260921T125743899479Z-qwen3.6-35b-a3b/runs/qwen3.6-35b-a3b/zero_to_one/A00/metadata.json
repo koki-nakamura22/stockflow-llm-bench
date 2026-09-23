@@ -1,0 +1,39 @@
+{
+  "model": "qwen3.6:35b-a3b",
+  "track": "zero_to_one",
+  "task": "A00",
+  "started_at": "2026-09-21T13:05:22.509149+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repeat_penalty": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "Successfully implemented StockFlow Mini from 0→1 with the following components:\n\n**Files Created:**\n- `stockflow/models.py` - SQLAlchemy models (Product, Order, OrderItem) with UUID IDs, UTC timestamps, tenant_id, and relationships\n- `stockflow/schemas.py` - Pydantic schemas for request/response validation\n- `stockflow/database.py` - Async SQLAlchemy engine and session factory\n- `stockflow/routers.py` - All API endpoints with error handling\n- `stockflow/main.py` - FastAPI app with HTTP exception handler\n- `alembic/env.py` - Alembic environment with model metadata\n- `alembic/script.py.mako` - Migration template\n- `alembic/versions/001_initial.py` - Initial migration creating products, orders, order_items tables\n- Updated `alembic.ini` with correct configuration\n\n**API Endpoints Implemented:**\n1. `GET /health` → 200 `{\"status\":\"ok\"}`\n2. `POST /products` → 201 (with SKU uniqueness per tenant)\n3. `GET /products/{id}` → 200 (tenant-isolated)\n4. `POST /orders` → 201 (atomic order creation + stock deduction with row-level locking)\n5. `GET /orders/{id}` → 200 (with items)\n6. `POST /orders/{id}/cancel` → 200 (atomic cancellation + stock restoration)\n\n**Error Handling:** INVALID_TENANT (400), VALIDATION_ERROR (422), NOT_FOUND (404), SKU_ALREADY_EXISTS (409), INSUFFICIENT_STOCK (409), INVALID_ORDER_STATE (409)\n\n**Checks Passed:** syntax (8 files), compose-config",
+    "turns": 33,
+    "last_prompt_tokens": 22540,
+    "prompt_tokens": 376573,
+    "completion_tokens": 10729,
+    "duration_seconds": 443.799
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 0,
+  "code_health_score": 100.0
+}

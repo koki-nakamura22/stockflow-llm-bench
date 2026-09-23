@@ -1,0 +1,39 @@
+{
+  "model": "qwen3.6:35b-a3b",
+  "track": "controlled_cold_change",
+  "task": "C04",
+  "started_at": "2026-09-21T13:35:16.712863+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repeat_penalty": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "Implemented transactional outbox pattern for order creation and cancellation:\n\n1. **OutboxEvent model** (`stockflow/models.py`): Added with fields: id, event_type, aggregate_id, occurred_at, payload (JSON), attempts, last_error, sent_at, created_at\n\n2. **Alembic migration** (`alembic/versions/0002_outbox_events.py`): Creates the outbox_events table with proper constraints and index\n\n3. **Updated domain handlers** (`stockflow/main.py`):\n   - `create_order`: Inserts `order.created` event in same transaction as order domain update\n   - `cancel_order`: Inserts `order.canceled` event in same transaction as cancel domain update\n   - Both ensure rollback = no event published\n\n4. **Outbox worker** (`stockflow/outbox_worker.py`):\n   - Supports `python -m stockflow.outbox_worker --once`\n   - Uses `FOR UPDATE SKIP LOCKED` to prevent multiple workers claiming same event\n   - POSTs to `EVENT_PUBLISH_URL` with `Idempotency-Key: event_id` header\n   - On 2xx: sets `sent_at`\n   - On failure: increments `attempts` and sets `last_error`\n   - At-least-once delivery guarantee\n\nAll checks pass: syntax (9 files), compose-config.",
+    "turns": 24,
+    "last_prompt_tokens": 21170,
+    "prompt_tokens": 289404,
+    "completion_tokens": 6227,
+    "duration_seconds": 372.949
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 100,
+  "code_health_score": 100.0
+}

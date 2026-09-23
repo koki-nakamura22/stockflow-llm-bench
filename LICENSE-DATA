@@ -1,0 +1,24 @@
+Creative Commons Attribution 4.0 International (CC BY 4.0)
+
+対象: results/ 以下の計測データ一式(summary.*, metadata.json, transcript.jsonl,
+run-config.json, changed-files.txt, BASELINE_MANIFEST.tsv, workspace/,
+submission.patch)および本リポジトリ直下の各ドキュメント(*.md)。
+
+これらは以下の条件で自由に複製・改変・再配布できる(商用利用を含む)。
+
+  表示 — 出典を明記し、変更した場合はその旨を示すこと。
+
+推奨する表示例:
+
+  StockFlow Local LLM Benchmark (Koki NAKAMURA) / CC BY 4.0
+  https://github.com/koki-nakamura22/stockflow-llm-bench
+
+ライセンス全文:
+  https://creativecommons.org/licenses/by/4.0/legalcode
+要約(法的文書ではない):
+  https://creativecommons.org/licenses/by/4.0/deed.ja
+
+なお results/ にはベンチマーク対象モデルが生成した出力が含まれる。
+各モデル側のライセンス状況は NOTICE を参照。
+
+コード部分には本ライセンスではなく Apache License 2.0 (LICENSE) が適用される。

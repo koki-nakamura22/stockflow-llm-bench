@@ -1,0 +1,7 @@
+model,track,task,evaluator_status,capability_score,code_health_score,agent_status,turns,prompt_tokens,completion_tokens,duration_seconds,public_tests_unchanged,run_dir
+laguna-xs-2.1:q4_K_M,zero_to_one,A00,completed,0,100.0,max_turns,40,382425,12881,492.458,True,./results/20260922T001538744335Z-laguna-xs-2.1-q4_K_M/runs/laguna-xs-2.1-q4_K_M/zero_to_one/A00
+laguna-xs-2.1:q4_K_M,controlled_cold_change,C01,completed,0,90.0,context_exceeded,38,802250,14616,889.031,True,./results/20260922T001538744335Z-laguna-xs-2.1-q4_K_M/runs/laguna-xs-2.1-q4_K_M/controlled_cold_change/C01
+laguna-xs-2.1:q4_K_M,controlled_cold_change,C02,completed,80,85.0,context_exceeded,24,313972,30986,1763.15,True,./results/20260922T001538744335Z-laguna-xs-2.1-q4_K_M/runs/laguna-xs-2.1-q4_K_M/controlled_cold_change/C02
+laguna-xs-2.1:q4_K_M,controlled_cold_change,C03,completed,100,100.0,completed,28,424338,11422,678.916,True,./results/20260922T001538744335Z-laguna-xs-2.1-q4_K_M/runs/laguna-xs-2.1-q4_K_M/controlled_cold_change/C03
+laguna-xs-2.1:q4_K_M,controlled_cold_change,C04,completed,45,100.0,max_turns,40,716471,11736,770.443,True,./results/20260922T001538744335Z-laguna-xs-2.1-q4_K_M/runs/laguna-xs-2.1-q4_K_M/controlled_cold_change/C04
+laguna-xs-2.1:q4_K_M,controlled_cold_change,C05,completed,100,100.0,context_exceeded,31,617179,29756,1628.331,True,./results/20260922T001538744335Z-laguna-xs-2.1-q4_K_M/runs/laguna-xs-2.1-q4_K_M/controlled_cold_change/C05

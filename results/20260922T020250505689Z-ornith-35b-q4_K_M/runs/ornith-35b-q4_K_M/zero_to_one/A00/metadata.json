@@ -1,0 +1,36 @@
+{
+  "model": "ornith:35b-q4_K_M",
+  "track": "zero_to_one",
+  "task": "A00",
+  "started_at": "2026-09-22T02:31:59.069237+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "model_error",
+    "error": "TimeoutError: timed out",
+    "summary": "",
+    "turns": 22,
+    "last_prompt_tokens": 17718,
+    "prompt_tokens": 240936,
+    "completion_tokens": 12349,
+    "duration_seconds": 1734.593
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 100,
+  "code_health_score": 100.0
+}

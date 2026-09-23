@@ -1,0 +1,39 @@
+{
+  "model": "qwen3.6:35b-a3b-coding-nvfp4",
+  "track": "controlled_cold_change",
+  "task": "C03",
+  "started_at": "2026-09-21T11:06:19.079143+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repeat_penalty": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 8192,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 57344,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "Implemented order state transitions in stockflow/main.py:\n\n1. **confirm** (`POST /orders/{id}/confirm`): PENDING → CONFIRMED, no inventory change\n2. **ship** (`POST /orders/{id}/ship`): CONFIRMED → SHIPPED, no inventory change\n3. **cancel** (`POST /orders/{id}/cancel`): Updated to support PENDING/CONFIRMED → CANCELED with idempotent inventory restoration (restores only once, subsequent cancels on already-CANCELED orders return the order without restoring inventory)\n\nAll transitions return 409 `INVALID_ORDER_STATE` for invalid state transitions. Uses `with_for_update()` row-level locking to handle concurrent operations safely. Tenant boundaries are preserved through existing tenant_id filtering.\n\nChecks run: syntax (pass), compose-config (pass)",
+    "turns": 12,
+    "last_prompt_tokens": 14783,
+    "prompt_tokens": 94438,
+    "completion_tokens": 3980,
+    "duration_seconds": 205.29
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 96,
+  "code_health_score": 100.0
+}

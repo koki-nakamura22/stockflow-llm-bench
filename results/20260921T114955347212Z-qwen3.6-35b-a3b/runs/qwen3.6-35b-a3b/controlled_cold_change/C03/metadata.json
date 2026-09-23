@@ -1,0 +1,39 @@
+{
+  "model": "qwen3.6:35b-a3b",
+  "track": "controlled_cold_change",
+  "task": "C03",
+  "started_at": "2026-09-21T12:25:01.592165+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repeat_penalty": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "Implemented order state transitions for C03:\n\n1. **`POST /orders/{id}/confirm`**: PENDING -> CONFIRMED\n   - Uses row-level locking (with_for_update) for concurrency control\n   - Returns 409 INVALID_ORDER_STATE for non-PENDING orders\n   - No stock changes\n\n2. **`POST /orders/{id}/ship`**: CONFIRMED -> SHIPPED\n   - Uses row-level locking for concurrency control\n   - Returns 409 INVALID_ORDER_STATE for non-CONFIRMED orders\n   - No stock changes\n\n3. **`POST /orders/{id}/cancel`**: PENDING/CONFIRMED -> CANCELED\n   - Updated to allow both PENDING and CONFIRMED states\n   - Stock restoration is idempotent (only when status is PENDING or CONFIRMED)\n   - Returns 409 INVALID_ORDER_STATE for SHIPPED or CANCELED states\n   - Uses row-level locking for concurrency control\n\nAll endpoints respect tenant boundaries via load_order() and maintain existing contracts.\n\nChecks run: syntax (pass), compose-config (pass), public-tests (failed due to server not running in test environment - expected)",
+    "turns": 11,
+    "last_prompt_tokens": 14765,
+    "prompt_tokens": 88143,
+    "completion_tokens": 2946,
+    "duration_seconds": 177.966
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 100,
+  "code_health_score": 100.0
+}

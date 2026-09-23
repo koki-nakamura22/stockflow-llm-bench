@@ -1,0 +1,252 @@
+{
+  "schema_version": "1.0",
+  "runs": [
+    {
+      "model": "nemotron-3.5-lightning:30b-a3b-q4_K_M",
+      "track": "zero_to_one",
+      "task": "A00",
+      "started_at": "2026-09-22T06:04:39.227191+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95
+        },
+        "context_window": 49152,
+        "max_output_tokens": 16384,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 32768,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "max_turns",
+        "error": null,
+        "summary": "",
+        "turns": 40,
+        "last_prompt_tokens": 23739,
+        "prompt_tokens": 464380,
+        "completion_tokens": 16560,
+        "duration_seconds": 795.626
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "error",
+      "capability_score": 0,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260922T055110237564Z-nemotron-3.5-lightning-30b-a3b-q4_K_M/runs/nemotron-3.5-lightning-30b-a3b-q4_K_M/zero_to_one/A00/workspace",
+      "run_dir": "./results/20260922T055110237564Z-nemotron-3.5-lightning-30b-a3b-q4_K_M/runs/nemotron-3.5-lightning-30b-a3b-q4_K_M/zero_to_one/A00",
+      "agent_status": "max_turns",
+      "turns": 40,
+      "prompt_tokens": 464380,
+      "completion_tokens": 16560,
+      "duration_seconds": 795.626
+    },
+    {
+      "model": "nemotron-3.5-lightning:30b-a3b-q4_K_M",
+      "track": "controlled_cold_change",
+      "task": "C01",
+      "started_at": "2026-09-22T06:20:06.268839+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95
+        },
+        "context_window": 49152,
+        "max_output_tokens": 16384,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 32768,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "context_exceeded",
+        "error": null,
+        "summary": "",
+        "turns": 14,
+        "last_prompt_tokens": 30933,
+        "prompt_tokens": 201675,
+        "completion_tokens": 15417,
+        "duration_seconds": 851.149
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 0,
+      "code_health_score": 65.0,
+      "workspace": "./results/20260922T055110237564Z-nemotron-3.5-lightning-30b-a3b-q4_K_M/runs/nemotron-3.5-lightning-30b-a3b-q4_K_M/controlled_cold_change/C01/workspace",
+      "run_dir": "./results/20260922T055110237564Z-nemotron-3.5-lightning-30b-a3b-q4_K_M/runs/nemotron-3.5-lightning-30b-a3b-q4_K_M/controlled_cold_change/C01",
+      "agent_status": "context_exceeded",
+      "turns": 14,
+      "prompt_tokens": 201675,
+      "completion_tokens": 15417,
+      "duration_seconds": 851.149
+    },
+    {
+      "model": "nemotron-3.5-lightning:30b-a3b-q4_K_M",
+      "track": "controlled_cold_change",
+      "task": "C02",
+      "started_at": "2026-09-22T06:32:20.583369+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95
+        },
+        "context_window": 49152,
+        "max_output_tokens": 16384,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 32768,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "context_exceeded",
+        "error": null,
+        "summary": "",
+        "turns": 31,
+        "last_prompt_tokens": 31620,
+        "prompt_tokens": 534882,
+        "completion_tokens": 13677,
+        "duration_seconds": 718.66
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 9,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260922T055110237564Z-nemotron-3.5-lightning-30b-a3b-q4_K_M/runs/nemotron-3.5-lightning-30b-a3b-q4_K_M/controlled_cold_change/C02/workspace",
+      "run_dir": "./results/20260922T055110237564Z-nemotron-3.5-lightning-30b-a3b-q4_K_M/runs/nemotron-3.5-lightning-30b-a3b-q4_K_M/controlled_cold_change/C02",
+      "agent_status": "context_exceeded",
+      "turns": 31,
+      "prompt_tokens": 534882,
+      "completion_tokens": 13677,
+      "duration_seconds": 718.66
+    },
+    {
+      "model": "nemotron-3.5-lightning:30b-a3b-q4_K_M",
+      "track": "controlled_cold_change",
+      "task": "C03",
+      "started_at": "2026-09-22T06:38:45.518918+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95
+        },
+        "context_window": 49152,
+        "max_output_tokens": 16384,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 32768,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "context_exceeded",
+        "error": null,
+        "summary": "",
+        "turns": 21,
+        "last_prompt_tokens": 31137,
+        "prompt_tokens": 331558,
+        "completion_tokens": 4627,
+        "duration_seconds": 368.304
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 100,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260922T055110237564Z-nemotron-3.5-lightning-30b-a3b-q4_K_M/runs/nemotron-3.5-lightning-30b-a3b-q4_K_M/controlled_cold_change/C03/workspace",
+      "run_dir": "./results/20260922T055110237564Z-nemotron-3.5-lightning-30b-a3b-q4_K_M/runs/nemotron-3.5-lightning-30b-a3b-q4_K_M/controlled_cold_change/C03",
+      "agent_status": "context_exceeded",
+      "turns": 21,
+      "prompt_tokens": 331558,
+      "completion_tokens": 4627,
+      "duration_seconds": 368.304
+    },
+    {
+      "model": "nemotron-3.5-lightning:30b-a3b-q4_K_M",
+      "track": "controlled_cold_change",
+      "task": "C04",
+      "started_at": "2026-09-22T06:48:54.695267+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95
+        },
+        "context_window": 49152,
+        "max_output_tokens": 16384,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 32768,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "context_exceeded",
+        "error": null,
+        "summary": "",
+        "turns": 30,
+        "last_prompt_tokens": 32200,
+        "prompt_tokens": 514278,
+        "completion_tokens": 10118,
+        "duration_seconds": 593.654
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 45,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260922T055110237564Z-nemotron-3.5-lightning-30b-a3b-q4_K_M/runs/nemotron-3.5-lightning-30b-a3b-q4_K_M/controlled_cold_change/C04/workspace",
+      "run_dir": "./results/20260922T055110237564Z-nemotron-3.5-lightning-30b-a3b-q4_K_M/runs/nemotron-3.5-lightning-30b-a3b-q4_K_M/controlled_cold_change/C04",
+      "agent_status": "context_exceeded",
+      "turns": 30,
+      "prompt_tokens": 514278,
+      "completion_tokens": 10118,
+      "duration_seconds": 593.654
+    },
+    {
+      "model": "nemotron-3.5-lightning:30b-a3b-q4_K_M",
+      "track": "controlled_cold_change",
+      "task": "C05",
+      "started_at": "2026-09-22T07:02:49.784951+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95
+        },
+        "context_window": 49152,
+        "max_output_tokens": 16384,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 32768,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "repeated_call",
+        "error": null,
+        "summary": "",
+        "turns": 31,
+        "last_prompt_tokens": 29747,
+        "prompt_tokens": 627559,
+        "completion_tokens": 15828,
+        "duration_seconds": 818.853
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 56,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260922T055110237564Z-nemotron-3.5-lightning-30b-a3b-q4_K_M/runs/nemotron-3.5-lightning-30b-a3b-q4_K_M/controlled_cold_change/C05/workspace",
+      "run_dir": "./results/20260922T055110237564Z-nemotron-3.5-lightning-30b-a3b-q4_K_M/runs/nemotron-3.5-lightning-30b-a3b-q4_K_M/controlled_cold_change/C05"
+    }
+  ]
+}

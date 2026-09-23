@@ -1,0 +1,327 @@
+diff --git a/alembic/versions/0001_initial.py b/alembic/versions/0001_initial.py
+index 0e52fd7..0acac3a 100755
+--- a/alembic/versions/0001_initial.py
++++ b/alembic/versions/0001_initial.py
+@@ -51,6 +51,23 @@ def upgrade() -> None:
+         sa.CheckConstraint("line_amount >= 0", name="ck_order_items_line"),
+     )
+     op.create_index("ix_order_items_order_id", "order_items", ["order_id"])
++    op.create_table(
++        "outbox",
++        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
++        sa.Column("event_id", postgresql.UUID(as_uuid=True), primary_key=True),
++        sa.Column("event_type", sa.String(50), nullable=False),
++        sa.Column("aggregate_id", postgresql.UUID(as_uuid=True), nullable=False),
++        sa.Column("payload", sa.JSON(), nullable=False),
++        sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
++        sa.Column("last_error", sa.String(2000), nullable=True),
++        sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
++        sa.Column("processed_at", sa.DateTime(timezone=True), nullable=True),
++        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
++        sa.CheckConstraint("attempts >= 0", name="ck_outbox_attempts"),
++        sa.CheckConstraint("event_type IN ('order.created', 'order.canceled')", name="ck_outbox_event_type"),
++    )
++    op.create_index("ix_outbox_event_type", "outbox", ["event_type"])
++    op.create_index("ix_outbox_aggregate_id", "outbox", ["aggregate_id"])
+ 
+ 
+ def downgrade() -> None:
+diff --git a/stockflow/__init__.py b/stockflow/__init__.py
+index 4fe9b28..e9b67f1 100755
+--- a/stockflow/__init__.py
++++ b/stockflow/__init__.py
+@@ -1,2 +1,6 @@
+ """StockFlow reference implementation."""
+ 
++from stockflow.models import Outbox  # noqa: F401
++
++__all__ = ["Outbox"]
++
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..622d6cb 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -109,46 +109,61 @@ def create_order(
+     tenant: uuid.UUID = Depends(tenant_id),
+     session: Session = Depends(get_session),
+ ) -> Order:
++    from stockflow.models import Outbox
++
+     quantities: dict[uuid.UUID, int] = defaultdict(int)
+     for item in body.items:
+         quantities[item.product_id] += item.quantity
+     product_ids = sorted(quantities, key=str)
+     try:
+-        products = list(
+-            session.scalars(
+-                select(Product)
+-                .where(Product.id.in_(product_ids), Product.tenant_id == tenant)
+-                .order_by(Product.id)
+-                .with_for_update()
++        with session.begin():
++            products = list(
++                session.scalars(
++                    select(Product)
++                    .where(Product.id.in_(product_ids), Product.tenant_id == tenant)
++                    .order_by(Product.id)
++                    .with_for_update()
++                )
+             )
+-        )
+-        if len(products) != len(product_ids):
+-            raise ApiError(404, "NOT_FOUND", "Product not found")
+-        for product in products:
+-            if product.stock < quantities[product.id]:
+-                raise ApiError(409, "INSUFFICIENT_STOCK", "Insufficient stock")
+-        order = Order(tenant_id=tenant, status="PENDING", total_amount=0)
+-        session.add(order)
+-        session.flush()
+-        total = 0
+-        for product in products:
+-            quantity = quantities[product.id]
+-            product.stock -= quantity
+-            line_amount = product.unit_price * quantity
+-            total += line_amount
+-            session.add(
+-                OrderItem(
+-                    order_id=order.id,
+-                    product_id=product.id,
+-                    sku=product.sku,
+-                    product_name=product.name,
+-                    unit_price=product.unit_price,
+-                    quantity=quantity,
+-                    line_amount=line_amount,
++            if len(products) != len(product_ids):
++                raise ApiError(404, "NOT_FOUND", "Product not found")
++            for product in products:
++                if product.stock < quantities[product.id]:
++                    raise ApiError(409, "INSUFFICIENT_STOCK", "Insufficient stock")
++            order = Order(tenant_id=tenant, status="PENDING", total_amount=0)
++            session.add(order)
++            session.flush()
++            total = 0
++            for product in products:
++                quantity = quantities[product.id]
++                product.stock -= quantity
++                line_amount = product.unit_price * quantity
++                total += line_amount
++                session.add(
++                    OrderItem(
++                        order_id=order.id,
++                        product_id=product.id,
++                        sku=product.sku,
++                        product_name=product.name,
++                        unit_price=product.unit_price,
++                        quantity=quantity,
++                        line_amount=line_amount,
++                    )
+                 )
++            order.total_amount = total
++            # Add outbox event
++            outbox_entry = Outbox(
++                event_id=uuid.uuid4(),
++                event_type="order.created",
++                aggregate_id=order.id,
++                payload={
++                    "tenant_id": str(tenant),
++                    "order_id": str(order.id),
++                    "status": order.status,
++                    "total_amount": order.total_amount,
++                },
+             )
+-        order.total_amount = total
+-        session.commit()
++            session.add(outbox_entry)
+     except ApiError:
+         session.rollback()
+         raise
+@@ -171,21 +186,35 @@ def cancel_order(
+     tenant: uuid.UUID = Depends(tenant_id),
+     session: Session = Depends(get_session),
+ ) -> Order:
++    from stockflow.models import Outbox
++
+     try:
+-        order = load_order(session, tenant, order_id, lock=True)
+-        if order.status != "PENDING":
+-            raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be canceled")
+-        product_ids = sorted((item.product_id for item in order.items), key=str)
+-        products = {
+-            product.id: product
+-            for product in session.scalars(
+-                select(Product).where(Product.id.in_(product_ids)).order_by(Product.id).with_for_update()
++        with session.begin():
++            order = load_order(session, tenant, order_id, lock=True)
++            if order.status != "PENDING":
++                raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be canceled")
++            product_ids = sorted((item.product_id for item in order.items), key=str)
++            products = {
++                product.id: product
++                for product in session.scalars(
++                    select(Product).where(Product.id.in_(product_ids)).order_by(Product.id).with_for_update()
++                )
++            }
++            for item in order.items:
++                products[item.product_id].stock += item.quantity
++            order.status = "CANCELED"
++            # Add outbox event
++            outbox_entry = Outbox(
++                event_id=uuid.uuid4(),
++                event_type="order.canceled",
++                aggregate_id=order.id,
++                payload={
++                    "tenant_id": str(tenant),
++                    "order_id": str(order.id),
++                    "status": order.status,
++                },
+             )
+-        }
+-        for item in order.items:
+-            products[item.product_id].stock += item.quantity
+-        order.status = "CANCELED"
+-        session.commit()
++            session.add(outbox_entry)
+     except ApiError:
+         session.rollback()
+         raise
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..220cf45 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -2,7 +2,7 @@ import uuid
+ from datetime import datetime
+ 
+ from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+-from sqlalchemy.dialects.postgresql import UUID
++from sqlalchemy.dialects.postgresql import JSONB, UUID
+ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+ 
+ 
+@@ -67,3 +67,19 @@ class OrderItem(Base):
+     line_amount: Mapped[int] = mapped_column(Integer)
+     order: Mapped[Order] = relationship(back_populates="items")
+ 
++
++class Outbox(Base):
++    __tablename__ = "outbox"
++    __table_args__ = (CheckConstraint("attempts >= 0", name="ck_outbox_attempts"),)
++
++    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
++    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
++    event_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
++    aggregate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
++    payload: Mapped[dict] = mapped_column(JSONB)
++    attempts: Mapped[int] = mapped_column(Integer, default=0)
++    last_error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
++    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
++    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
++    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
++
+diff --git a/stockflow/outbox_worker.py b/stockflow/outbox_worker.py
+new file mode 100644
+index 0000000..8b96d39
+--- /dev/null
++++ b/stockflow/outbox_worker.py
+@@ -0,0 +1,89 @@
++"""Outbox worker for publishing events."""
++import os
++import uuid
++from datetime import datetime
++from typing import Any
++
++import requests
++from sqlalchemy import select, text
++from sqlalchemy.orm import Session
++from sqlalchemy.dialects.postgresql import JSONB
++
++EVENT_PUBLISH_URL = os.environ.get("EVENT_PUBLISH_URL", "http://localhost:8080/events")
++MAX_ATTEMPTS = 10
++
++
++def publish_event(session: Session) -> int:
++    """Publish one event from the outbox.
++
++    Returns the number of events published.
++    """
++    published = 0
++
++    # Get the last processed event_id and event_type to avoid duplicates
++    last_event_id = session.scalar(select(Outbox.event_id).order_by(Outbox.event_id.desc()).limit(1))
++    last_event_type = session.scalar(select(Outbox.event_type).order_by(Outbox.event_type.desc()).limit(1))
++
++    # Find unprocessed events with unique event_id and event_type
++    stmt = (
++        select(Outbox)
++        .where(
++            Outbox.sent_at.is_(None),
++            Outbox.processed_at.is_(None),
++            Outbox.attempts < MAX_ATTEMPTS,
++        )
++        .where(
++            Outbox.event_id != last_event_id,
++            Outbox.event_type != last_event_type,
++        )
++        .order_by(Outbox.event_id)
++        .with_for_update(skip_locked=True)
++        .limit(1)
++    )
++
++    outbox_entry = session.scalar(stmt)
++    if not outbox_entry:
++        return published
++
++    payload = outbox_entry.payload
++    headers = {"Idempotency-Key": str(outbox_entry.event_id)}
++
++    try:
++        response = requests.post(
++            EVENT_PUBLISH_URL,
++            json=payload,
++            headers=headers,
++            timeout=5,
++        )
++
++        if response.status_code < 200 or response.status_code >= 300:
++            raise requests.HTTPError(f"HTTP {response.status_code}: {response.text}")
++
++        outbox_entry.sent_at = datetime.utcnow()
++        outbox_entry.processed_at = datetime.utcnow()
++        session.commit()
++        published += 1
++    except requests.HTTPError as exc:
++        outbox_entry.attempts += 1
++        outbox_entry.last_error = str(exc)
++        session.commit()
++    except Exception as exc:  # noqa: BLE001
++        outbox_entry.attempts += 1
++        outbox_entry.last_error = str(exc)
++        session.commit()
++
++    return published
++
++
++def run_once(session: Session) -> int:
++    """Run the worker once."""
++    return publish_event(session)
++
++
++if __name__ == "__main__":
++    from stockflow.models import Outbox
++    from stockflow.db import SessionLocal
++
++    with SessionLocal() as session:
++        published = run_once(session)
++        print(f"Published {published} event(s)")
+\ No newline at end of file
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..3e8d274 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -2,6 +2,7 @@ import uuid
+ from datetime import datetime
+ 
+ from pydantic import BaseModel, ConfigDict, Field
++from sqlalchemy.dialects.postgresql import JSONB
+ 
+ 
+ class ProductCreate(BaseModel):

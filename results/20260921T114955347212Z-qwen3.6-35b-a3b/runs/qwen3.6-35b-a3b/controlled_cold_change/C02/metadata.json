@@ -1,0 +1,39 @@
+{
+  "model": "qwen3.6:35b-a3b",
+  "track": "controlled_cold_change",
+  "task": "C02",
+  "started_at": "2026-09-21T12:21:47.115106+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repeat_penalty": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "Implemented idempotency support for POST /orders endpoint:\n\n1. **New Model**: Added `IdempotencyKey` model in `stockflow/models.py` with fields:\n   - `tenant_id`, `endpoint`, `idempotency_key` (unique scope constraint)\n   - `request_hash` (SHA-256 of normalized request body)\n   - `response_status`, `response_body` (stored 201 response)\n   - `created_at`, `updated_at`\n\n2. **New Migration**: Created `alembic/versions/0002_add_idempotency_keys.py` with:\n   - Table creation with unique constraint on (tenant_id, endpoint, idempotency_key)\n   - Check constraint enforcing 1-128 character length\n\n3. **Endpoint Changes** in `stockflow/main.py`:\n   - Added `Idempotency-Key` header validation (ASCII 1-128 chars, required)\n   - Added `compute_request_hash()` for normalized request comparison\n   - Modified `create_order` to:\n     - Check for existing idempotency key before processing\n     - Return stored 201 response if same key + same request\n     - Return 409 `IDEMPOTENCY_CONFLICT` if same key + different request\n     - Only store idempotency key after successful order creation\n     - Handle concurrent requests via unique constraint + IntegrityError fallback\n\n4. **Key Behaviors**:\n   - Scope is `tenant_id + endpoint + key` (different tenants can use same key)\n   - Validation/inventory failures don't record success\n   - Concurrent requests result in single order/inventory deduction\n   - Existing response schema unchanged",
+    "turns": 25,
+    "last_prompt_tokens": 30134,
+    "prompt_tokens": 400604,
+    "completion_tokens": 7681,
+    "duration_seconds": 486.146
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 9,
+  "code_health_score": 100.0
+}

@@ -1,0 +1,12 @@
+{
+  "model": "qwen3.6:35b-a3b-coding-nvfp4",
+  "adapter": "ollama",
+  "think": "off",
+  "context_window": 32768,
+  "max_output_tokens": 8192,
+  "request_timeout_seconds": 1200,
+  "context_guard_tokens": 24576,
+  "max_no_tool_turns": 3,
+  "max_repeated_calls": 8,
+  "max_turns": 40
+}

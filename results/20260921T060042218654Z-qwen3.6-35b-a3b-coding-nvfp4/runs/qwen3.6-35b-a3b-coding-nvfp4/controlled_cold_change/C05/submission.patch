@@ -1,0 +1,329 @@
+diff --git a/MIGRATION.md b/MIGRATION.md
+new file mode 100644
+index 0000000..d58dc1d
+--- /dev/null
++++ b/MIGRATION.md
+@@ -0,0 +1,54 @@
++# Rolling Migration: Tax Amount Expansion
++
++## Background
++Existing `orders.total_amount` stores tax-exclusive total (subtotal).
++We need to expand to `subtotal_amount`, `tax_amount`, `total_amount`.
++
++## Rules
++- `tax_amount = floor(subtotal_amount * 0.10)`
++- `total_amount = subtotal_amount + tax_amount`
++- API requests do not accept amount values; amounts are computed server-side.
++
++## Migration Strategy
++
++### Phase 1: Expand (`make migrate-expand`)
++- **Revision**: `0002_expand_tax_columns`
++- **Action**: Add `subtotal_amount` and `tax_amount` columns to `orders` table.
++- **Backfill**:
++  - `subtotal_amount = total_amount` (old column is tax-exclusive)
++  - `tax_amount = floor(subtotal_amount * 0.10)`
++- **Trigger**: Add a BEFORE UPDATE trigger `trg_sync_tax_columns` that keeps
++  `subtotal_amount` and `tax_amount` in sync when `total_amount` changes.
++  This ensures old app writes to `total_amount` are reflected in new columns.
++- **Compatibility**: Old app's read/write of `total_amount` is not broken.
++  The trigger ensures new columns are updated on old app writes.
++- **Idempotency**: Re-running this migration is safe; the trigger is idempotent
++  (CREATE OR REPLACE) and backfill uses the current `total_amount` value.
++
++### Phase 2: Contract (`make migrate-contract`)
++- **Revision**: `0003_contract_remove_total`
++- **Action**: Remove the old `total_amount` column after old app is stopped.
++- **Precondition**: Old app must be stopped before running this.
++- **Downgrade**: Re-add `total_amount` as `subtotal_amount + tax_amount`.
++
++## Column Semantics
++- **During compatibility** (after expand, before contract):
++  - Physical column `total_amount` still means tax-exclusive (old semantics).
++  - New columns `subtotal_amount` and `tax_amount` are populated.
++  - Trigger keeps `subtotal_amount` and `tax_amount` in sync with `total_amount`.
++- **After contract**:
++  - `total_amount` column is removed.
++  - Only `subtotal_amount` and `tax_amount` remain.
++  - `total_amount` is computed as `subtotal_amount + tax_amount` in the API response.
++
++## API Changes
++- `OrderOut` now includes `subtotal_amount`, `tax_amount`, and `total_amount`.
++- `OrderCreate` does not accept amount values; amounts are computed server-side.
++- `create_order` computes `subtotal_amount` from items, then `tax_amount = floor(subtotal * 0.10)`,
++  and `total_amount = subtotal + tax_amount`.
++
++## Idempotency
++- Re-running `migrate-expand` does not double-add because:
++  - The trigger uses CREATE OR REPLACE (idempotent).
++  - Backfill reads current `total_amount` and sets `subtotal_amount` and `tax_amount`.
++  - If already backfilled, re-running sets the same values (no double computation).
+diff --git a/Makefile b/Makefile
+index c37318d..90ff31d 100755
+--- a/Makefile
++++ b/Makefile
+@@ -1,10 +1,13 @@
+-.PHONY: migrate test lint typecheck
++.PHONY: migrate test lint typecheck migrate-expand migrate-contract
+ migrate:
+ 	alembic upgrade head
++migrate-expand:
++	alembic upgrade 0002_expand_tax_columns
++migrate-contract:
++	alembic upgrade 0003_contract_remove_total
+ test:
+ 	pytest -q
+ lint:
+ 	ruff check stockflow tests
+ typecheck:
+ 	mypy stockflow
+-
+diff --git a/alembic/versions/0002_expand_tax_columns.py b/alembic/versions/0002_expand_tax_columns.py
+new file mode 100644
+index 0000000..47161b0
+--- /dev/null
++++ b/alembic/versions/0002_expand_tax_columns.py
+@@ -0,0 +1,48 @@
++"""expand: add subtotal_amount and tax_amount columns"""
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++from math import floor
++
++revision = "0002_expand_tax_columns"
++down_revision = "0001_initial"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    # Add new columns
++    op.add_column("orders", sa.Column("subtotal_amount", sa.Integer(), nullable=False, server_default="0"))
++    op.add_column("orders", sa.Column("tax_amount", sa.Integer(), nullable=False, server_default="0"))
++    
++    # Backfill: subtotal_amount = old total_amount (tax-exclusive)
++    op.execute("UPDATE orders SET subtotal_amount = total_amount")
++    
++    # Backfill: tax_amount = floor(subtotal_amount * 0.10)
++    op.execute("UPDATE orders SET tax_amount = floor(subtotal_amount * 0.10)")
++    
++    # Create trigger to keep subtotal_amount and tax_amount in sync when total_amount changes
++    # This handles old app writes to total_amount
++    op.execute("""
++        CREATE OR REPLACE FUNCTION sync_tax_columns()
++        RETURNS TRIGGER AS $$
++        BEGIN
++            NEW.subtotal_amount := NEW.total_amount;
++            NEW.tax_amount := floor(NEW.total_amount * 0.10);
++            RETURN NEW;
++        END;
++        $$ LANGUAGE plpgsql
++    """)
++    op.execute("""
++        CREATE TRIGGER trg_sync_tax_columns
++        BEFORE UPDATE ON orders
++        FOR EACH ROW
++        WHEN (OLD.subtotal_amount IS DISTINCT FROM NEW.subtotal_amount OR
++              OLD.tax_amount IS DISTINCT FROM NEW.tax_amount)
++        EXECUTE FUNCTION sync_tax_columns()
++    """)
++
++
++def downgrade() -> None:
++    op.drop_column("orders", "tax_amount")
++    op.drop_column("orders", "subtotal_amount")
+diff --git a/alembic/versions/0003_contract_remove_total.py b/alembic/versions/0003_contract_remove_total.py
+new file mode 100644
+index 0000000..b417c70
+--- /dev/null
++++ b/alembic/versions/0003_contract_remove_total.py
+@@ -0,0 +1,24 @@
++"""contract: remove old total_amount column after migration is complete"""
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++
++revision = "0003_contract_remove_total"
++down_revision = "0002_expand_tax_columns"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++     # Remove the trigger
++    op.execute("DROP TRIGGER IF EXISTS trg_sync_tax_columns ON orders")
++    op.execute("DROP FUNCTION IF EXISTS sync_tax_columns()")
++    
++     # Remove the old total_amount column
++    op.drop_column("orders", "total_amount")
++
++
++def downgrade() -> None:
++     # Re-add total_amount as the sum of subtotal and tax
++    op.add_column("orders", sa.Column("total_amount", sa.Integer(), nullable=False, server_default="0"))
++    op.execute("UPDATE orders SET total_amount = subtotal_amount + tax_amount")
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..d2fee5f 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,5 +1,6 @@
+ import uuid
+ from collections import defaultdict
++from math import floor
+ from typing import Any
+ 
+ from fastapi import Depends, FastAPI, Header, Request
+@@ -32,7 +33,7 @@ def error_body(code: str, message: str, details: dict[str, Any] | None = None) -
+ def api_error_handler(_request: Request, exc: ApiError) -> JSONResponse:
+     return JSONResponse(
+         status_code=exc.status, content=error_body(exc.code, exc.message, exc.details)
+-    )
++     )
+ 
+ 
+ @app.exception_handler(RequestValidationError)
+@@ -40,7 +41,7 @@ def validation_error_handler(_request: Request, exc: RequestValidationError) ->
+     return JSONResponse(
+         status_code=422,
+         content=error_body("VALIDATION_ERROR", "Invalid request", {"errors": exc.errors()}),
+-    )
++     )
+ 
+ 
+ def tenant_id(x_tenant_id: str | None = Header(default=None)) -> uuid.UUID:
+@@ -55,9 +56,9 @@ def tenant_id(x_tenant_id: str | None = Header(default=None)) -> uuid.UUID:
+ def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: bool = False) -> Order:
+     stmt = (
+         select(Order)
+-        .where(Order.id == order_id, Order.tenant_id == tenant)
+-        .options(selectinload(Order.items))
+-    )
++         .where(Order.id == order_id, Order.tenant_id == tenant)
++         .options(selectinload(Order.items))
++      )
+     if lock:
+         stmt = stmt.with_for_update()
+     order = session.scalar(stmt)
+@@ -97,7 +98,7 @@ def get_product(
+ ) -> Product:
+     product = session.scalar(
+         select(Product).where(Product.id == product_id, Product.tenant_id == tenant)
+-    )
++      )
+     if product is None:
+         raise ApiError(404, "NOT_FOUND", "Product not found")
+     return product
+@@ -117,37 +118,39 @@ def create_order(
+         products = list(
+             session.scalars(
+                 select(Product)
+-                .where(Product.id.in_(product_ids), Product.tenant_id == tenant)
+-                .order_by(Product.id)
+-                .with_for_update()
+-            )
+-        )
++                 .where(Product.id.in_(product_ids), Product.tenant_id == tenant)
++                 .order_by(Product.id)
++                 .with_for_update()
++             )
++         )
+         if len(products) != len(product_ids):
+             raise ApiError(404, "NOT_FOUND", "Product not found")
+-        for product in products:
+-            if product.stock < quantities[product.id]:
+-                raise ApiError(409, "INSUFFICIENT_STOCK", "Insufficient stock")
+-        order = Order(tenant_id=tenant, status="PENDING", total_amount=0)
+-        session.add(order)
+-        session.flush()
+-        total = 0
++        subtotal = 0
++        order_items = []
+         for product in products:
+             quantity = quantities[product.id]
+             product.stock -= quantity
+             line_amount = product.unit_price * quantity
+-            total += line_amount
+-            session.add(
++            subtotal += line_amount
++            order_items.append(
+                 OrderItem(
+-                    order_id=order.id,
+                     product_id=product.id,
+                     sku=product.sku,
+                     product_name=product.name,
+                     unit_price=product.unit_price,
+                     quantity=quantity,
+                     line_amount=line_amount,
+-                )
+-            )
+-        order.total_amount = total
++                 )
++             )
++        order = Order(tenant_id=tenant, status="PENDING", subtotal_amount=subtotal)
++        session.add(order)
++        session.flush()
++        tax_amount = floor(subtotal * 0.10)
++        order.tax_amount = tax_amount
++        order.total_amount = subtotal + tax_amount
++        for item in order_items:
++            item.order_id = order.id
++            session.add(item)
+         session.commit()
+     except ApiError:
+         session.rollback()
+@@ -180,8 +183,8 @@ def cancel_order(
+             product.id: product
+             for product in session.scalars(
+                 select(Product).where(Product.id.in_(product_ids)).order_by(Product.id).with_for_update()
+-            )
+-        }
++              )
++         }
+         for item in order.items:
+             products[item.product_id].stock += item.quantity
+         order.status = "CANCELED"
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..e69ff7e 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -32,12 +32,18 @@ class Product(Base):
+ 
+ class Order(Base):
+     __tablename__ = "orders"
+-    __table_args__ = (CheckConstraint("total_amount >= 0", name="ck_orders_total"),)
++    __table_args__ = (
++        CheckConstraint("subtotal_amount >= 0", name="ck_orders_subtotal"),
++        CheckConstraint("tax_amount >= 0", name="ck_orders_tax"),
++        CheckConstraint("total_amount >= 0", name="ck_orders_total"),
++    )
+ 
+     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+     status: Mapped[str] = mapped_column(String(20), default="PENDING")
+-    total_amount: Mapped[int] = mapped_column(Integer)
++    subtotal_amount: Mapped[int] = mapped_column(Integer, default=0)
++    tax_amount: Mapped[int] = mapped_column(Integer, default=0)
++    total_amount: Mapped[int] = mapped_column(Integer, default=0)
+     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+     updated_at: Mapped[datetime] = mapped_column(
+         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+@@ -66,4 +72,3 @@ class OrderItem(Base):
+     quantity: Mapped[int] = mapped_column(Integer)
+     line_amount: Mapped[int] = mapped_column(Integer)
+     order: Mapped[Order] = relationship(back_populates="items")
+-
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..095aef8 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -45,8 +45,9 @@ class OrderOut(BaseModel):
+     id: uuid.UUID
+     tenant_id: uuid.UUID
+     status: str
++    subtotal_amount: int
++    tax_amount: int
+     total_amount: int
+     created_at: datetime
+     updated_at: datetime
+     items: list[OrderItemOut]
+-

@@ -1,0 +1,35 @@
+{
+  "model": "glm-4.7-flash:q4_K_M",
+  "track": "controlled_cold_change",
+  "task": "C03",
+  "started_at": "2026-09-22T08:24:14.334294+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.7,
+      "top_p": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "Implemented order state transitions for C03:\n\n**Changes Made:**\n\n1. **stockflow/models.py**: Added Order status constants (PENDING, CONFIRMED, SHIPPED, CANCELED) to the Order model for type-safe status comparisons.\n\n2. **stockflow/main.py**: Implemented three new endpoints:\n   - `POST /orders/{id}/confirm`: Transitions PENDING → CONFIRMED (no inventory changes)\n   - `POST /orders/{id}/ship`: Transitions CONFIRMED → SHIPPED (no inventory changes)\n   - Updated `cancel_order`: Now accepts PENDING and CONFIRMED → CANCELED (restores inventory once)\n\n**Key Features:**\n- All invalid state transitions return 409 INVALID_ORDER_STATE\n- Inventory is restored exactly once for cancel (status set to CANCELED prevents double restoration)\n- Confirm and ship operations do not modify inventory (already reserved from order creation)\n- Concurrent operations handled via `with_for_update()` row locking\n- Tenant boundaries enforced via tenant_id decorator and load_order function",
+    "turns": 21,
+    "last_prompt_tokens": 18218,
+    "prompt_tokens": 202123,
+    "completion_tokens": 6009,
+    "duration_seconds": 906.08
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 100,
+  "code_health_score": 100.0
+}

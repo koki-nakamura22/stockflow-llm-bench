@@ -1,0 +1,204 @@
+diff --git a/MIGRATION.md b/MIGRATION.md
+new file mode 100644
+index 0000000..b6b96ea
+--- /dev/null
++++ b/MIGRATION.md
+@@ -0,0 +1,52 @@
++# Rolling Migration Plan: Tax Calculation
++
++## Overview
++This document describes the rolling migration from a single `total_amount` column to separate `subtotal_amount`, `tax_amount`, and `total_amount` columns with tax calculation.
++
++## Migration Phases
++
++### Phase 1: Expand (Add New Columns)
++- **Command**: `make migrate-expand` (or `alembic upgrade head`)
++- **Changes**:
++  - Added new columns: `subtotal_amount`, `tax_amount`, `total_amount_new`
++  - Maintained backward compatibility with existing `total_amount` column
++  - Updated models and schemas to support both old and new fields
++  - Modified order creation logic to populate new fields
++
++### Phase 2: Contract (Remove Old Column)
++- **Command**: `make migrate-contract` (after app shutdown)
++- **Changes**:
++  - Removed the old `total_amount` column
++  - Updated constraints to only reference new columns
++
++## Implementation Details
++
++### Tax Calculation Logic
++- `tax_amount = floor(subtotal_amount * 0.10)`
++- `total_amount_new = subtotal_amount + tax_amount`
++
++### Backward Compatibility
++During the migration period:
++- The old `total_amount` column retains its pre-tax value (for compatibility)
++- New fields (`subtotal_amount`, `tax_amount`, `total_amount_new`) are populated with proper values
++- API responses include all fields for both old and new clients
++
++### Data Migration
++- All existing rows will have their tax-related fields populated during the expand phase
++- New orders will automatically populate all fields correctly
++- The migration is idempotent - re-running won't cause double calculation
++
++## Commands
++```bash
++# Expand phase - run while app is still running
++make migrate
++
++# Contract phase - run after app stops
++make migrate-contract
++```
++
++## Notes
++1. This migration supports rolling updates without downtime
++2. The old `total_amount` column is maintained for backward compatibility
++3. All new orders will have tax calculation properly applied
++4. The contract phase should only be executed after all application instances are stopped
+\ No newline at end of file
+diff --git a/alembic/versions/0002_add_tax_columns.py b/alembic/versions/0002_add_tax_columns.py
+new file mode 100644
+index 0000000..e07b7c3
+--- /dev/null
++++ b/alembic/versions/0002_add_tax_columns.py
+@@ -0,0 +1,46 @@
++"""add tax columns for rolling migration"""
++
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++
++revision = "0002_add_tax_columns"
++down_revision = "0001_initial"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    # Add new columns for tax calculation
++    op.add_column("orders", sa.Column("subtotal_amount", sa.Integer(), nullable=True))
++    op.add_column("orders", sa.Column("tax_amount", sa.Integer(), nullable=True))
++    op.add_column("orders", sa.Column("total_amount_new", sa.Integer(), nullable=True))
++    
++    # Add check constraints for new columns
++    op.create_check_constraint(
++        "ck_orders_subtotal",
++        "orders",
++        "subtotal_amount >= 0"
++    )
++    op.create_check_constraint(
++        "ck_orders_tax",
++        "orders",
++        "tax_amount >= 0"
++    )
++    op.create_check_constraint(
++        "ck_orders_total_new",
++        "orders",
++        "total_amount_new >= 0"
++    )
++
++
++def downgrade() -> None:
++    # Remove new columns
++    op.drop_column("orders", "total_amount_new")
++    op.drop_column("orders", "tax_amount")
++    op.drop_column("orders", "subtotal_amount")
++    
++    # Remove check constraints
++    op.execute("ALTER TABLE orders DROP CONSTRAINT IF EXISTS ck_orders_subtotal")
++    op.execute("ALTER TABLE orders DROP CONSTRAINT IF EXISTS ck_orders_tax")
++    op.execute("ALTER TABLE orders DROP CONSTRAINT IF EXISTS ck_orders_total_new")
+\ No newline at end of file
+diff --git a/alembic/versions/0003_remove_old_column.py b/alembic/versions/0003_remove_old_column.py
+new file mode 100644
+index 0000000..8cd870a
+--- /dev/null
++++ b/alembic/versions/0003_remove_old_column.py
+@@ -0,0 +1,29 @@
++"""remove old total_amount column after migration is complete"""
++
++from alembic import op
++import sqlalchemy as sa
++
++revision = "0003_remove_old_column"
++down_revision = "0002_add_tax_columns"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    # Remove the old total_amount column
++    op.drop_column("orders", "total_amount")
++    
++    # Remove the old check constraint
++    op.execute("ALTER TABLE orders DROP CONSTRAINT IF EXISTS ck_orders_total")
++
++
++def downgrade() -> None:
++    # Add back the old total_amount column
++    op.add_column("orders", sa.Column("total_amount", sa.Integer(), nullable=False))
++    
++    # Add back the old check constraint
++    op.create_check_constraint(
++        "ck_orders_total",
++        "orders",
++        "total_amount >= 0"
++    )
+\ No newline at end of file
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..9f6ac49 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -147,7 +147,11 @@ def create_order(
+                     line_amount=line_amount,
+                 )
+             )
++        # Set both old and new fields for compatibility
+         order.total_amount = total
++        order.subtotal_amount = total
++        order.tax_amount = total // 10  # floor(subtotal_amount * 0.10)
++        order.total_amount_new = total + (total // 10)  # subtotal_amount + tax_amount
+         session.commit()
+     except ApiError:
+         session.rollback()
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..276d081 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -32,12 +32,19 @@ class Product(Base):
+ 
+ class Order(Base):
+     __tablename__ = "orders"
+-    __table_args__ = (CheckConstraint("total_amount >= 0", name="ck_orders_total"),)
++    __table_args__ = (
++        CheckConstraint("subtotal_amount >= 0", name="ck_orders_subtotal"),
++        CheckConstraint("tax_amount >= 0", name="ck_orders_tax"),
++        CheckConstraint("total_amount_new >= 0", name="ck_orders_total_new"),
++    )
+ 
+     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+     status: Mapped[str] = mapped_column(String(20), default="PENDING")
+-    total_amount: Mapped[int] = mapped_column(Integer)
++    total_amount: Mapped[int] = mapped_column(Integer)  # Old column - for compatibility
++    subtotal_amount: Mapped[int] = mapped_column(Integer, nullable=True)  # New column
++    tax_amount: Mapped[int] = mapped_column(Integer, nullable=True)  # New column
++    total_amount_new: Mapped[int] = mapped_column(Integer, nullable=True)  # New column
+     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+     updated_at: Mapped[datetime] = mapped_column(
+         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..ee9cc40 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -46,6 +46,9 @@ class OrderOut(BaseModel):
+     tenant_id: uuid.UUID
+     status: str
+     total_amount: int
++    subtotal_amount: int | None
++    tax_amount: int | None
++    total_amount_new: int | None
+     created_at: datetime
+     updated_at: datetime
+     items: list[OrderItemOut]

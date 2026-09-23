@@ -1,0 +1,252 @@
+{
+  "schema_version": "1.0",
+  "runs": [
+    {
+      "model": "gpt-oss:20b",
+      "track": "zero_to_one",
+      "task": "A00",
+      "started_at": "2026-09-21T16:22:47.583793+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "medium",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "max_turns",
+        "error": null,
+        "summary": "",
+        "turns": 40,
+        "last_prompt_tokens": 11530,
+        "prompt_tokens": 293962,
+        "completion_tokens": 10906,
+        "duration_seconds": 630.636
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 0,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/zero_to_one/A00/workspace",
+      "run_dir": "./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/zero_to_one/A00",
+      "agent_status": "max_turns",
+      "turns": 40,
+      "prompt_tokens": 293962,
+      "completion_tokens": 10906,
+      "duration_seconds": 630.636
+    },
+    {
+      "model": "gpt-oss:20b",
+      "track": "controlled_cold_change",
+      "task": "C01",
+      "started_at": "2026-09-21T16:51:12.957491+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "medium",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "context_exceeded",
+        "error": null,
+        "summary": "",
+        "turns": 38,
+        "last_prompt_tokens": 40133,
+        "prompt_tokens": 792273,
+        "completion_tokens": 26052,
+        "duration_seconds": 1691.12
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 100,
+      "code_health_score": 90.0,
+      "workspace": "./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/controlled_cold_change/C01/workspace",
+      "run_dir": "./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/controlled_cold_change/C01",
+      "agent_status": "context_exceeded",
+      "turns": 38,
+      "prompt_tokens": 792273,
+      "completion_tokens": 26052,
+      "duration_seconds": 1691.12
+    },
+    {
+      "model": "gpt-oss:20b",
+      "track": "controlled_cold_change",
+      "task": "C02",
+      "started_at": "2026-09-21T17:11:00.039452+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "medium",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "max_turns",
+        "error": null,
+        "summary": "",
+        "turns": 40,
+        "last_prompt_tokens": 29520,
+        "prompt_tokens": 577704,
+        "completion_tokens": 19491,
+        "duration_seconds": 1176.258
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "error",
+      "capability_score": 0,
+      "code_health_score": 90.0,
+      "workspace": "./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/controlled_cold_change/C02/workspace",
+      "run_dir": "./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/controlled_cold_change/C02",
+      "agent_status": "max_turns",
+      "turns": 40,
+      "prompt_tokens": 577704,
+      "completion_tokens": 19491,
+      "duration_seconds": 1176.258
+    },
+    {
+      "model": "gpt-oss:20b",
+      "track": "controlled_cold_change",
+      "task": "C03",
+      "started_at": "2026-09-21T17:21:14.140690+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "medium",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "max_turns",
+        "error": null,
+        "summary": "",
+        "turns": 40,
+        "last_prompt_tokens": 19299,
+        "prompt_tokens": 427011,
+        "completion_tokens": 10074,
+        "duration_seconds": 601.239
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 100,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/controlled_cold_change/C03/workspace",
+      "run_dir": "./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/controlled_cold_change/C03",
+      "agent_status": "max_turns",
+      "turns": 40,
+      "prompt_tokens": 427011,
+      "completion_tokens": 10074,
+      "duration_seconds": 601.239
+    },
+    {
+      "model": "gpt-oss:20b",
+      "track": "controlled_cold_change",
+      "task": "C04",
+      "started_at": "2026-09-21T17:24:05.459792+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "medium",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "model_error",
+        "error": "RuntimeError: HTTP 500 from model endpoint: {\"error\":\"error parsing tool call: raw='{\\\"path\\\":\\\"stockflow/models.py\\\",\\\"line_start\\\":1,\\\"line_end\\\":400,\\\"content\\\":\\\"import uuid\\\\nfrom datetime import datetime\\\\n\\\\nfrom sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func\\\\nfrom sqlalchemy.dialects.postgresql import UUID, JSONB\\\\nfrom sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship\\\\n\\\\n\\\\nclass Base(DeclarativeBase):\\\\n    pass\\\\n\\\\n\\\\nclass Product(Base):\\\\n    __tablename__ = \\\\\\\"products\\\\\\\"\\\\n    __table_args__ = (\\\\n        UniqueConstraint(\\\\\\\"tenant_id\\\\\\\", \\\\\\\"sku\\\\\\\", name=\\\\\\\"uq_products_tenant_sku\\\\\\\"),\\\\n        CheckConstraint(\\\\\\\"unit_price \\u003e= 0\\\\\\\", name=\\\\\\\"ck_products_price\\\\\\\"),\\\\n        CheckConstraint(\\\\\\\"stock \\u003e= 0\\\\\\\", name=\\\\\\\"ck_products_stock\\\\\\\"),\\\\n    )\\\\n\\\\n    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)\\\\n    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=",
+        "summary": "",
+        "turns": 8,
+        "last_prompt_tokens": 4734,
+        "prompt_tokens": 15465,
+        "completion_tokens": 811,
+        "duration_seconds": 157.944
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 25,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/controlled_cold_change/C04/workspace",
+      "run_dir": "./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/controlled_cold_change/C04",
+      "agent_status": "model_error",
+      "turns": 8,
+      "prompt_tokens": 15465,
+      "completion_tokens": 811,
+      "duration_seconds": 157.944
+    },
+    {
+      "model": "gpt-oss:20b",
+      "track": "controlled_cold_change",
+      "task": "C05",
+      "started_at": "2026-09-21T17:39:44.715645+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "medium",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "max_turns",
+        "error": null,
+        "summary": "",
+        "turns": 40,
+        "last_prompt_tokens": 27709,
+        "prompt_tokens": 630775,
+        "completion_tokens": 15538,
+        "duration_seconds": 928.321
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "error",
+      "capability_score": 0,
+      "code_health_score": 70.0,
+      "workspace": "./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/controlled_cold_change/C05/workspace",
+      "run_dir": "./results/20260921T161104580146Z-gpt-oss-20b/runs/gpt-oss-20b/controlled_cold_change/C05"
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "model": "qwen3.6:35b-a3b-coding-nvfp4",
+  "track": "controlled_cold_change",
+  "task": "C02",
+  "started_at": "2026-09-21T11:02:37.719031+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repeat_penalty": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 8192,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 57344,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "no_tool_call",
+    "error": null,
+    "summary": "",
+    "turns": 12,
+    "last_prompt_tokens": 11515,
+    "prompt_tokens": 91572,
+    "completion_tokens": 29865,
+    "duration_seconds": 1176.562
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 9,
+  "code_health_score": 85.0
+}

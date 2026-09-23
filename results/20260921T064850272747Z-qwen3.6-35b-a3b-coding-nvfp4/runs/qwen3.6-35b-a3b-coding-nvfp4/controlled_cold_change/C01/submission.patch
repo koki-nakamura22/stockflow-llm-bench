@@ -1,0 +1,222 @@
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..81e0a6f 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,20 +1,28 @@
++import os
+ import uuid
+ from collections import defaultdict
++from datetime import datetime, timezone
+ from typing import Any
+ 
+-from fastapi import Depends, FastAPI, Header, Request
++import hmac
++import hashlib
++import base64
++import struct
++from fastapi import Depends, FastAPI, Header, Query, Request
+ from fastapi.exceptions import RequestValidationError
+ from fastapi.responses import JSONResponse
+-from sqlalchemy import select, text
++from sqlalchemy import select, text, and_, or_
+ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+ from stockflow.models import Order, OrderItem, Product
+-from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
++from stockflow.schemas import OrderCreate, OrderOut, OrdersListQuery, OrdersListResponse, ProductCreate, ProductOut
+ 
+ app = FastAPI(title="StockFlow Mini")
+ 
++CURSOR_SECRET = os.environ.get("CURSOR_SECRET", "")
++
+ 
+ class ApiError(Exception):
+     def __init__(self, status: int, code: str, message: str, details: dict[str, Any] | None = None):
+@@ -55,9 +63,9 @@ def tenant_id(x_tenant_id: str | None = Header(default=None)) -> uuid.UUID:
+ def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: bool = False) -> Order:
+     stmt = (
+         select(Order)
+-        .where(Order.id == order_id, Order.tenant_id == tenant)
+-        .options(selectinload(Order.items))
+-    )
++         .where(Order.id == order_id, Order.tenant_id == tenant)
++         .options(selectinload(Order.items))
++     )
+     if lock:
+         stmt = stmt.with_for_update()
+     order = session.scalar(stmt)
+@@ -66,6 +74,42 @@ def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: b
+     return order
+ 
+ 
++# Cursor encoding/decoding for tamper detection
++def _encode_cursor(created_at: datetime, order_id: uuid.UUID) -> str:
++    """Encode cursor with HMAC signature for tamper detection."""
++    # Serialize: created_at (ISO string) + order_id (hex)
++    data = f"{created_at.isoformat()}|{order_id.hex}"
++    sig = hmac.new(CURSOR_SECRET.encode(), data.encode(), hashlib.sha256).hexdigest()
++    payload = f"{data}|{sig}"
++    return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
++
++
++def _decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
++    """Decode cursor and verify HMAC signature."""
++    try:
++        # Add padding if needed
++        padded = cursor + "=" * (4 - len(cursor) % 4) if len(cursor) % 4 else cursor
++        payload = base64.urlsafe_b64decode(padded.encode()).decode()
++        # Split into data and signature
++        parts = payload.rsplit("|", 1)
++        if len(parts) != 2:
++            raise ValueError("Invalid cursor format")
++        data, sig = parts
++        # Verify signature
++        expected_sig = hmac.new(CURSOR_SECRET.encode(), data.encode(), hashlib.sha256).hexdigest()
++        if not hmac.compare_digest(sig, expected_sig):
++            raise ValueError("Invalid signature")
++        # Parse data
++        data_parts = data.split("|")
++        if len(data_parts) != 2:
++            raise ValueError("Invalid cursor data")
++        created_at = datetime.fromisoformat(data_parts[0])
++        order_id = uuid.UUID(hex=data_parts[1])
++        return created_at, order_id
++    except Exception as exc:
++        raise ApiError(400, "INVALID_CURSOR", "Cursor is invalid or tampered") from exc
++
++
+ @app.get("/health")
+ def health(session: Session = Depends(get_session)) -> dict[str, str]:
+     session.execute(text("SELECT 1"))
+@@ -97,7 +141,7 @@ def get_product(
+ ) -> Product:
+     product = session.scalar(
+         select(Product).where(Product.id == product_id, Product.tenant_id == tenant)
+-    )
++     )
+     if product is None:
+         raise ApiError(404, "NOT_FOUND", "Product not found")
+     return product
+@@ -117,9 +161,9 @@ def create_order(
+         products = list(
+             session.scalars(
+                 select(Product)
+-                .where(Product.id.in_(product_ids), Product.tenant_id == tenant)
+-                .order_by(Product.id)
+-                .with_for_update()
++                 .where(Product.id.in_(product_ids), Product.tenant_id == tenant)
++                 .order_by(Product.id)
++                 .with_for_update()
+             )
+         )
+         if len(products) != len(product_ids):
+@@ -145,7 +189,7 @@ def create_order(
+                     unit_price=product.unit_price,
+                     quantity=quantity,
+                     line_amount=line_amount,
+-                )
++                 )
+             )
+         order.total_amount = total
+         session.commit()
+@@ -191,3 +235,70 @@ def cancel_order(
+         raise
+     session.expire_all()
+     return load_order(session, tenant, order.id)
++
++
++@app.get("/orders", response_model=OrdersListResponse)
++def list_orders(
++    limit: int = Query(ge=1, le=100),
++    status: str | None = Query(default=None),
++    created_from: str | None = Query(default=None),
++    created_to: str | None = Query(default=None),
++    cursor: str | None = Query(default=None),
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> OrdersListResponse:
++    """List orders with cursor pagination."""
++    # Build base query with tenant filter
++    conditions = [Order.tenant_id == tenant]
++
++    if status is not None:
++        conditions.append(Order.status == status)
++
++    if created_from is not None:
++        try:
++            dt_from = datetime.fromisoformat(created_from)
++            if dt_from.tzinfo is None:
++                dt_from = dt_from.replace(tzinfo=timezone.utc)
++            conditions.append(Order.created_at >= dt_from)
++        except ValueError:
++            raise ApiError(400, "INVALID_CURSOR", "Invalid created_from format")
++
++    if created_to is not None:
++        try:
++            dt_to = datetime.fromisoformat(created_to)
++            if dt_to.tzinfo is None:
++                dt_to = dt_to.replace(tzinfo=timezone.utc)
++            conditions.append(Order.created_at <= dt_to)
++        except ValueError:
++            raise ApiError(400, "INVALID_CURSOR", "Invalid created_to format")
++
++    # Build the base query
++    stmt = select(Order).where(and_(*conditions)).order_by(Order.created_at.desc(), Order.id.desc())
++
++    # If cursor is provided, decode it and apply the cursor filter
++    if cursor is not None:
++        created_at, order_id = _decode_cursor(cursor)
++        # Cursor means: return items AFTER the cursor position
++        # Since we order by created_at DESC, id DESC, "after" means:
++        # (created_at < cursor_created_at) OR (created_at == cursor_created_at AND id < cursor_id)
++        stmt = stmt.where(
++            or_(
++                Order.created_at < created_at,
++                and_(Order.created_at == created_at, Order.id < order_id)
++            )
++        )
++
++    # Add limit + 1 to check if there are more items
++    stmt = stmt.limit(limit + 1)
++
++    orders = session.scalars(stmt).all()
++
++    # Determine if there's a next cursor
++    next_cursor = None
++    if len(orders) > limit:
++        # Remove the extra item and generate cursor for the last item
++        orders = orders[:limit]
++        last_order = orders[-1]
++        next_cursor = _encode_cursor(last_order.created_at, last_order.id)
++
++    return OrdersListResponse(items=orders, next_cursor=next_cursor)
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..102db34 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -1,5 +1,6 @@
+ import uuid
+ from datetime import datetime
++from typing import Optional
+ 
+ from pydantic import BaseModel, ConfigDict, Field
+ 
+@@ -50,3 +51,16 @@ class OrderOut(BaseModel):
+     updated_at: datetime
+     items: list[OrderItemOut]
+ 
++
++class OrdersListResponse(BaseModel):
++    model_config = ConfigDict(from_attributes=True)
++    items: list[OrderOut]
++    next_cursor: Optional[str] = None
++
++
++class OrdersListQuery(BaseModel):
++    limit: int = Field(ge=1, le=100)
++    status: Optional[str] = None
++    created_from: Optional[str] = None
++    created_to: Optional[str] = None
++    cursor: Optional[str] = None

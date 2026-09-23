@@ -1,0 +1,136 @@
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..8dd2542 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -32,7 +32,7 @@ def error_body(code: str, message: str, details: dict[str, Any] | None = None) -
+ def api_error_handler(_request: Request, exc: ApiError) -> JSONResponse:
+     return JSONResponse(
+         status_code=exc.status, content=error_body(exc.code, exc.message, exc.details)
+-    )
++     )
+ 
+ 
+ @app.exception_handler(RequestValidationError)
+@@ -40,7 +40,7 @@ def validation_error_handler(_request: Request, exc: RequestValidationError) ->
+     return JSONResponse(
+         status_code=422,
+         content=error_body("VALIDATION_ERROR", "Invalid request", {"errors": exc.errors()}),
+-    )
++     )
+ 
+ 
+ def tenant_id(x_tenant_id: str | None = Header(default=None)) -> uuid.UUID:
+@@ -55,9 +55,9 @@ def tenant_id(x_tenant_id: str | None = Header(default=None)) -> uuid.UUID:
+ def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: bool = False) -> Order:
+     stmt = (
+         select(Order)
+-        .where(Order.id == order_id, Order.tenant_id == tenant)
+-        .options(selectinload(Order.items))
+-    )
++         .where(Order.id == order_id, Order.tenant_id == tenant)
++         .options(selectinload(Order.items))
++     )
+     if lock:
+         stmt = stmt.with_for_update()
+     order = session.scalar(stmt)
+@@ -97,7 +97,7 @@ def get_product(
+ ) -> Product:
+     product = session.scalar(
+         select(Product).where(Product.id == product_id, Product.tenant_id == tenant)
+-    )
++     )
+     if product is None:
+         raise ApiError(404, "NOT_FOUND", "Product not found")
+     return product
+@@ -117,11 +117,11 @@ def create_order(
+         products = list(
+             session.scalars(
+                 select(Product)
+-                .where(Product.id.in_(product_ids), Product.tenant_id == tenant)
+-                .order_by(Product.id)
+-                .with_for_update()
+-            )
+-        )
++                 .where(Product.id.in_(product_ids), Product.tenant_id == tenant)
++                 .order_by(Product.id)
++                 .with_for_update()
++             )
++         )
+         if len(products) != len(product_ids):
+             raise ApiError(404, "NOT_FOUND", "Product not found")
+         for product in products:
+@@ -145,8 +145,8 @@ def create_order(
+                     unit_price=product.unit_price,
+                     quantity=quantity,
+                     line_amount=line_amount,
+-                )
+-            )
++                 )
++             )
+         order.total_amount = total
+         session.commit()
+     except ApiError:
+@@ -165,6 +165,44 @@ def get_order(
+     return load_order(session, tenant, order_id)
+ 
+ 
++@app.post("/orders/{order_id}/confirm", response_model=OrderOut)
++def confirm_order(
++    order_id: uuid.UUID,
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> Order:
++    try:
++        order = load_order(session, tenant, order_id, lock=True)
++        if order.status != "PENDING":
++            raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be confirmed")
++        order.status = "CONFIRMED"
++        session.commit()
++    except ApiError:
++        session.rollback()
++        raise
++    session.expire_all()
++    return load_order(session, tenant, order.id)
++
++
++@app.post("/orders/{order_id}/ship", response_model=OrderOut)
++def ship_order(
++    order_id: uuid.UUID,
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> Order:
++    try:
++        order = load_order(session, tenant, order_id, lock=True)
++        if order.status != "CONFIRMED":
++            raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be shipped")
++        order.status = "SHIPPED"
++        session.commit()
++    except ApiError:
++        session.rollback()
++        raise
++    session.expire_all()
++    return load_order(session, tenant, order.id)
++
++
+ @app.post("/orders/{order_id}/cancel", response_model=OrderOut)
+ def cancel_order(
+     order_id: uuid.UUID,
+@@ -173,15 +211,15 @@ def cancel_order(
+ ) -> Order:
+     try:
+         order = load_order(session, tenant, order_id, lock=True)
+-        if order.status != "PENDING":
++        if order.status not in ("PENDING", "CONFIRMED"):
+             raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be canceled")
+         product_ids = sorted((item.product_id for item in order.items), key=str)
+         products = {
+             product.id: product
+             for product in session.scalars(
+                 select(Product).where(Product.id.in_(product_ids)).order_by(Product.id).with_for_update()
+-            )
+-        }
++               )
++           }
+         for item in order.items:
+             products[item.product_id].stock += item.quantity
+         order.status = "CANCELED"

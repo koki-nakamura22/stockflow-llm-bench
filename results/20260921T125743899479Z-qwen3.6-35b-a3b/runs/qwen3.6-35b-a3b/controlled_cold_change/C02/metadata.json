@@ -1,0 +1,39 @@
+{
+  "model": "qwen3.6:35b-a3b",
+  "track": "controlled_cold_change",
+  "task": "C02",
+  "started_at": "2026-09-21T13:26:13.508875+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repeat_penalty": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "Implementation complete. Added idempotency support to `POST /orders` endpoint:\n\n**Changes made:**\n\n1. **Migration** (`alembic/versions/0002_add_idempotency_keys.py`):\n   - Created `idempotency_keys` table with columns: id, tenant_id, key, request_body, status_code, response_body\n   - Unique constraint on (tenant_id, key) to enforce per-tenant uniqueness\n   - Check constraint on status_code\n\n2. **Model** (`stockflow/models.py`):\n   - Added `IdempotencyKey` SQLAlchemy model\n   - Added `Text` import for request_body column\n\n3. **Schema** (`stockflow/schemas.py`):\n   - Added `IdempotencyKeyHeader` schema (for reference, though Header() is used directly)\n\n4. **Endpoint** (`stockflow/main.py`):\n   - Added `idempotency_key()` dependency that validates:\n     - Header is required\n     - ASCII 1-128 characters only (printable ASCII: 32-126)\n   - Updated `create_order()` to:\n     - Use retry loop with unique constraint to handle concurrent requests\n     - First request with same key creates order and records result (status_code=201)\n     - Subsequent requests with same key return cached 201 response without re-deducting inventory\n     - Failed requests (validation/insufficient stock) delete the idempotency entry so key can be reused\n     - Different status codes trigger 409 IDEMPOTENCY_CONFLICT\n\n**Key behaviors:**\n- Same key + same request = idempotent (returns first 201)\n- Same key + different request = 409 conflict\n- Concurrent same-key = only one order created (via unique constraint)\n- Different tenants can use same key (scoped to tenant_id + key)\n- Failed validations/stock don't record as successful results",
+    "turns": 28,
+    "last_prompt_tokens": 38922,
+    "prompt_tokens": 551509,
+    "completion_tokens": 15371,
+    "duration_seconds": 883.254
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 0,
+  "code_health_score": 85.0
+}

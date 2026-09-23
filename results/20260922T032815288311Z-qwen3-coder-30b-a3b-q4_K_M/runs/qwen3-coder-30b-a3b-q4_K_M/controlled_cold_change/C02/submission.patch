@@ -1,0 +1,423 @@
+diff --git a/alembic/versions/0002_idempotency_key.py b/alembic/versions/0002_idempotency_key.py
+new file mode 100644
+index 0000000..50d6bfb
+--- /dev/null
++++ b/alembic/versions/0002_idempotency_key.py
+@@ -0,0 +1,32 @@
++"""idempotency key table"""
++
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++import uuid
++
++revision = "0002_idempotency_key"
++down_revision = "0001_initial"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.create_table(
++        "idempotency_keys",
++        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
++        sa.Column("tenant_id", postgresql.UUID(as_uuid=True), nullable=False),
++        sa.Column("endpoint", sa.String(200), nullable=False),
++        sa.Column("key", sa.String(128), nullable=False),
++        sa.Column("request_hash", sa.String(64), nullable=False),
++        sa.Column("response_status", sa.Integer(), nullable=False),
++        sa.Column("response_body", sa.Text(), nullable=False),
++        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
++        sa.UniqueConstraint("tenant_id", "endpoint", "key", name="uq_idempotency_keys_tenant_endpoint_key"),
++    )
++    op.create_index("ix_idempotency_keys_tenant_id", "idempotency_keys", ["tenant_id"])
++    op.create_index("ix_idempotency_keys_created_at", "idempotency_keys", ["created_at"])
++
++
++def downgrade() -> None:
++    op.drop_table("idempotency_keys")
+\ No newline at end of file
+diff --git a/stockflow/db.py b/stockflow/db.py
+index 24d586f..16495ce 100755
+--- a/stockflow/db.py
++++ b/stockflow/db.py
+@@ -4,12 +4,15 @@ from collections.abc import Iterator
+ from sqlalchemy import create_engine
+ from sqlalchemy.orm import Session, sessionmaker
+ 
++from stockflow.models import Base, IdempotencyKey
++
+ DATABASE_URL = os.environ.get(
+     "DATABASE_URL", "postgresql+psycopg://stockflow:stockflow@db:5432/stockflow"
+ )
+ 
+ engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
++Base.metadata.create_all(bind=engine)
+ 
+ 
+ def get_session() -> Iterator[Session]:
+diff --git a/stockflow/idempotency_key.py b/stockflow/idempotency_key.py
+new file mode 100644
+index 0000000..fb7d7aa
+--- /dev/null
++++ b/stockflow/idempotency_key.py
+@@ -0,0 +1,79 @@
++import hashlib
++import json
++import uuid
++from typing import Any
++
++from sqlalchemy.orm import Session
++
++from stockflow.models import IdempotencyKey
++
++
++def create_idempotency_key(
++    session: Session,
++    tenant_id: uuid.UUID,
++    endpoint: str,
++    key: str,
++    request_body: dict[str, Any],
++    response_status: int,
++    response_body: dict[str, Any],
++) -> None:
++    """Create an idempotency key record."""
++    # Hash the request body for comparison
++    request_hash = hashlib.sha256(
++        json.dumps(request_body, sort_keys=True, separators=(",", ":")).encode()
++    ).hexdigest()
++    
++    # Create the idempotency key record
++    idempotency_key = IdempotencyKey(
++        tenant_id=tenant_id,
++        endpoint=endpoint,
++        key=key,
++        request_hash=request_hash,
++        response_status=response_status,
++        response_body=json.dumps(response_body, separators=(",", ":")),
++    )
++    session.add(idempotency_key)
++    session.flush()
++
++
++def get_idempotency_key(
++    session: Session,
++    tenant_id: uuid.UUID,
++    endpoint: str,
++    key: str,
++) -> IdempotencyKey | None:
++    """Get an idempotency key record."""
++    return session.scalar(
++        IdempotencyKey.__table__.select().where(
++            IdempotencyKey.tenant_id == tenant_id,
++            IdempotencyKey.endpoint == endpoint,
++            IdempotencyKey.key == key,
++        )
++    )
++
++
++def validate_idempotency_key(
++    session: Session,
++    tenant_id: uuid.UUID,
++    endpoint: str,
++    key: str,
++    request_body: dict[str, Any],
++) -> tuple[int, dict[str, Any]] | None:
++    """Validate idempotency key and return stored response if exists."""
++    # Hash the current request body
++    request_hash = hashlib.sha256(
++        json.dumps(request_body, sort_keys=True, separators=(",", ":")).encode()
++    ).hexdigest()
++    
++    # Check if this key already exists
++    existing_key = get_idempotency_key(session, tenant_id, endpoint, key)
++    if not existing_key:
++        return None  # No previous request with this key
++    
++    # If the request hash matches, return the stored response
++    if existing_key.request_hash == request_hash:
++        response_body = json.loads(existing_key.response_body)
++        return (existing_key.response_status, response_body)
++    
++    # Request hash does not match - conflict
++    return (409, {"error": {"code": "IDEMPOTENCY_CONFLICT", "message": "Idempotency key conflict"}})
+\ No newline at end of file
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..100f87c 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -10,7 +10,8 @@ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+-from stockflow.models import Order, OrderItem, Product
++from stockflow.idempotency_key import create_idempotency_key, validate_idempotency_key
++from stockflow.models import IdempotencyKey, Order, OrderItem, Product
+ from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
+ 
+ app = FastAPI(title="StockFlow Mini")
+@@ -107,8 +108,27 @@ def get_product(
+ def create_order(
+     body: OrderCreate,
+     tenant: uuid.UUID = Depends(tenant_id),
++    x_idempotency_key: str | None = Header(default=None),
+     session: Session = Depends(get_session),
+ ) -> Order:
++    # Validate idempotency key if provided
++    if x_idempotency_key is not None:
++        # Validate the key format (ASCII 1-128 characters, required)
++        if not (1 <= len(x_idempotency_key) <= 128):
++            raise ApiError(400, "INVALID_IDEMPOTENCY_KEY", "Idempotency key must be 1-128 ASCII characters")
++        
++        # Check for existing idempotent request
++        result = validate_idempotency_key(
++            session, tenant, "/orders", x_idempotency_key, body.model_dump()
++        )
++        if result is not None:
++            status_code, response_body = result
++            if status_code == 409:
++                raise ApiError(409, "IDEMPOTENCY_CONFLICT", "Idempotency key conflict")
++            else:
++                # Return stored response (this shouldn't happen for successful orders)
++                raise ApiError(status_code, "INTERNAL_ERROR", "Unexpected idempotent response")
++    
+     quantities: dict[uuid.UUID, int] = defaultdict(int)
+     for item in body.items:
+         quantities[item.product_id] += item.quantity
+@@ -149,6 +169,14 @@ def create_order(
+             )
+         order.total_amount = total
+         session.commit()
++        
++        # Store idempotency key only for successful requests
++        if x_idempotency_key is not None:
++            create_idempotency_key(
++                session, tenant, "/orders", x_idempotency_key, body.model_dump(), 201, 
++                OrderOut.model_validate(order).model_dump()
++            )
++        
+     except ApiError:
+         session.rollback()
+         raise
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..b68b778 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -30,6 +30,22 @@ class Product(Base):
+     )
+ 
+ 
++class IdempotencyKey(Base):
++    __tablename__ = "idempotency_keys"
++    __table_args__ = (
++        UniqueConstraint("tenant_id", "endpoint", "key", name="uq_idempotency_keys_tenant_endpoint_key"),
++    )
++
++    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
++    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
++    endpoint: Mapped[str] = mapped_column(String(200))
++    key: Mapped[str] = mapped_column(String(128))
++    request_hash: Mapped[str] = mapped_column(String(64))
++    response_status: Mapped[int] = mapped_column(Integer)
++    response_body: Mapped[str] = mapped_column(String)
++    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
++
++
+ class Order(Base):
+     __tablename__ = "orders"
+     __table_args__ = (CheckConstraint("total_amount >= 0", name="ck_orders_total"),)
+@@ -65,5 +81,4 @@ class OrderItem(Base):
+     unit_price: Mapped[int] = mapped_column(Integer)
+     quantity: Mapped[int] = mapped_column(Integer)
+     line_amount: Mapped[int] = mapped_column(Integer)
+-    order: Mapped[Order] = relationship(back_populates="items")
+-
++    order: Mapped[Order] = relationship(back_populates="items")
+\ No newline at end of file
+diff --git a/stockflow/tests/test_idempotency.py b/stockflow/tests/test_idempotency.py
+new file mode 100644
+index 0000000..0d028df
+--- /dev/null
++++ b/stockflow/tests/test_idempotency.py
+@@ -0,0 +1,179 @@
++"""Idempotency tests."""
++
++import os
++import uuid
++
++import requests
++
++BASE_URL = os.environ.get("BASE_URL", "http://app:8000")
++
++
++def test_idempotency_basic() -> None:
++    """Test basic idempotency functionality."""
++    tenant = str(uuid.uuid4())
++    headers = {"X-Tenant-Id": tenant}
++    
++    # Create a product
++    product_response = requests.post(
++        f"{BASE_URL}/products",
++        headers=headers,
++        json={"sku": "IDEMPOTENCY-1", "name": "Idempotency test product", "unit_price": 100, "stock": 10},
++        timeout=10,
++    )
++    assert product_response.status_code == 201
++    product_id = product_response.json()["id"]
++    
++    # Create an order with idempotency key
++    order_body = {"items": [{"product_id": product_id, "quantity": 2}]}
++    response1 = requests.post(
++        f"{BASE_URL}/orders",
++        headers={**headers, "Idempotency-Key": "test-key-1"},
++        json=order_body,
++        timeout=10,
++    )
++    assert response1.status_code == 201
++    order1 = response1.json()
++    
++    # Create the same order with same idempotency key
++    response2 = requests.post(
++        f"{BASE_URL}/orders",
++        headers={**headers, "Idempotency-Key": "test-key-1"},
++        json=order_body,
++        timeout=10,
++    )
++    assert response2.status_code == 201
++    order2 = response2.json()
++    
++    # Should return the same order
++    assert order1["id"] == order2["id"]
++    
++    # Check that stock was only reduced once
++    product_response = requests.get(f"{BASE_URL}/products/{product_id}", headers=headers, timeout=10)
++    assert product_response.status_code == 200
++    assert product_response.json()["stock"] == 8
++
++
++def test_idempotency_conflict() -> None:
++    """Test idempotency conflict detection."""
++    tenant = str(uuid.uuid4())
++    headers = {"X-Tenant-Id": tenant}
++    
++    # Create a product
++    product_response = requests.post(
++        f"{BASE_URL}/products",
++        headers=headers,
++        json={"sku": "IDEMPOTENCY-2", "name": "Idempotency test product 2", "unit_price": 100, "stock": 10},
++        timeout=10,
++    )
++    assert product_response.status_code == 201
++    product_id = product_response.json()["id"]
++    
++    # Create an order with idempotency key
++    order_body1 = {"items": [{"product_id": product_id, "quantity": 2}]}
++    response1 = requests.post(
++        f"{BASE_URL}/orders",
++        headers={**headers, "Idempotency-Key": "test-key-2"},
++        json=order_body1,
++        timeout=10,
++    )
++    assert response1.status_code == 201
++    
++    # Create the same key with different request (should fail)
++    order_body2 = {"items": [{"product_id": product_id, "quantity": 3}]}
++    response2 = requests.post(
++        f"{BASE_URL}/orders",
++        headers={**headers, "Idempotency-Key": "test-key-2"},
++        json=order_body2,
++        timeout=10,
++    )
++    assert response2.status_code == 409
++    assert response2.json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
++
++
++def test_idempotency_different_tenants() -> None:
++    """Test that same idempotency key works across different tenants."""
++    tenant1 = str(uuid.uuid4())
++    tenant2 = str(uuid.uuid4())
++    headers1 = {"X-Tenant-Id": tenant1}
++    headers2 = {"X-Tenant-Id": tenant2}
++    
++    # Create products
++    product_response1 = requests.post(
++        f"{BASE_URL}/products",
++        headers=headers1,
++        json={"sku": "IDEMPOTENCY-3", "name": "Idempotency test product 3", "unit_price": 100, "stock": 10},
++        timeout=10,
++    )
++    assert product_response1.status_code == 201
++    product_id1 = product_response1.json()["id"]
++    
++    product_response2 = requests.post(
++        f"{BASE_URL}/products",
++        headers=headers2,
++        json={"sku": "IDEMPOTENCY-3", "name": "Idempotency test product 3", "unit_price": 100, "stock": 10},
++        timeout=10,
++    )
++    assert product_response2.status_code == 201
++    product_id2 = product_response2.json()["id"]
++    
++    # Create orders with same idempotency key but different tenants
++    order_body = {"items": [{"product_id": product_id1, "quantity": 2}]}
++    response1 = requests.post(
++        f"{BASE_URL}/orders",
++        headers={**headers1, "Idempotency-Key": "same-key"},
++        json=order_body,
++        timeout=10,
++    )
++    assert response1.status_code == 201
++    
++    order_body = {"items": [{"product_id": product_id2, "quantity": 2}]}
++    response2 = requests.post(
++        f"{BASE_URL}/orders",
++        headers={**headers2, "Idempotency-Key": "same-key"},
++        json=order_body,
++        timeout=10,
++    )
++    assert response2.status_code == 201
++    
++    # Both should succeed (different tenants, so same key is allowed)
++    # Check that both orders were created with different product ids
++    assert response1.json()["items"][0]["product_id"] == product_id1
++    assert response2.json()["items"][0]["product_id"] == product_id2
++
++
++def test_idempotency_key_validation() -> None:
++    """Test idempotency key validation."""
++    tenant = str(uuid.uuid4())
++    headers = {"X-Tenant-Id": tenant}
++    
++    # Create a product
++    product_response = requests.post(
++        f"{BASE_URL}/products",
++        headers=headers,
++        json={"sku": "IDEMPOTENCY-4", "name": "Idempotency test product 4", "unit_price": 100, "stock": 10},
++        timeout=10,
++    )
++    assert product_response.status_code == 201
++    product_id = product_response.json()["id"]
++    
++    # Test with empty idempotency key (should fail)
++    order_body = {"items": [{"product_id": product_id, "quantity": 2}]}
++    response = requests.post(
++        f"{BASE_URL}/orders",
++        headers={**headers, "Idempotency-Key": ""},
++        json=order_body,
++        timeout=10,
++    )
++    assert response.status_code == 400
++    assert response.json()["error"]["code"] == "INVALID_IDEMPOTENCY_KEY"
++    
++    # Test with too long idempotency key (should fail)
++    long_key = "a" * 129
++    response = requests.post(
++        f"{BASE_URL}/orders",
++        headers={**headers, "Idempotency-Key": long_key},
++        json=order_body,
++        timeout=10,
++    )
++    assert response.status_code == 400
++    assert response.json()["error"]["code"] == "INVALID_IDEMPOTENCY_KEY"
+\ No newline at end of file

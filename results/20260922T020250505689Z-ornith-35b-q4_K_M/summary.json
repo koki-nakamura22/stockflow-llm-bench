@@ -1,0 +1,258 @@
+{
+  "schema_version": "1.0",
+  "runs": [
+    {
+      "model": "ornith:35b-q4_K_M",
+      "track": "zero_to_one",
+      "task": "A00",
+      "started_at": "2026-09-22T02:31:59.069237+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 0.6,
+          "top_p": 0.95,
+          "top_k": 20
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "model_error",
+        "error": "TimeoutError: timed out",
+        "summary": "",
+        "turns": 22,
+        "last_prompt_tokens": 17718,
+        "prompt_tokens": 240936,
+        "completion_tokens": 12349,
+        "duration_seconds": 1734.593
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 100,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/zero_to_one/A00/workspace",
+      "run_dir": "./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/zero_to_one/A00",
+      "agent_status": "model_error",
+      "turns": 22,
+      "prompt_tokens": 240936,
+      "completion_tokens": 12349,
+      "duration_seconds": 1734.593
+    },
+    {
+      "model": "ornith:35b-q4_K_M",
+      "track": "controlled_cold_change",
+      "task": "C01",
+      "started_at": "2026-09-22T02:36:57.629462+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 0.6,
+          "top_p": 0.95,
+          "top_k": 20
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "completed",
+        "error": null,
+        "summary": "## Implementation Summary: C01 Cursor Pagination for `GET /orders`\n\n### Changes Made\n\n**`stockflow/schemas.py`** — Added `OrderListResponse` Pydantic model:\n```python\nclass OrderListResponse(BaseModel):\n    items: list[OrderOut]\n    next_cursor: str | None = None\n```\n\n**`stockflow/main.py`** — Added:\n1. **Cursor helpers** (`_cursor_encode` / `_cursor_decode`) — HMAC-SHA256 signed, base64url-encoded JSON payload. Format: `<b64>.<hex-sig>`. Tamper-evident via `hmac.compare_digest`.\n2. **`_parse_dt`** — Safe ISO-datetime parser with UTC fallback.\n3. **`GET /orders` endpoint** with:\n   - `limit` (required, 1–100)\n   - Optional `status`, `created_from`, `created_to`, `cursor` query params\n   - Order: `created_at DESC, id DESC`\n   - Cursor-based filtering using `(created_at, id) < (cursor_created_at, cursor_id)` to avoid duplicates/gaps\n   - Filter mismatch detection (cursor includes `status`, `created_from`, `created_to` in its signed payload)\n   - Returns `{\"items\": [...], \"next_cursor\": \"string or null\"}`\n   - Tenant isolation via `tenant_id` dependency (inherited from existing pattern)\n\n### Verification\n- `syntax` check: ✅ pass\n- `compose-config` check: ✅ pass\n- `public-tests`: ⏭ skipped (integration tests requiring live server)",
+        "turns": 14,
+        "last_prompt_tokens": 18299,
+        "prompt_tokens": 140066,
+        "completion_tokens": 5552,
+        "duration_seconds": 284.286
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 100,
+      "code_health_score": 90.0,
+      "workspace": "./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/controlled_cold_change/C01/workspace",
+      "run_dir": "./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/controlled_cold_change/C01",
+      "agent_status": "completed",
+      "turns": 14,
+      "prompt_tokens": 140066,
+      "completion_tokens": 5552,
+      "duration_seconds": 284.286
+    },
+    {
+      "model": "ornith:35b-q4_K_M",
+      "track": "controlled_cold_change",
+      "task": "C02",
+      "started_at": "2026-09-22T02:52:18.137289+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 0.6,
+          "top_p": 0.95,
+          "top_k": 20
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "completed",
+        "error": null,
+        "summary": "Implemented idempotency key support for `POST /orders`:\n\n**Migration** (`alembic/versions/0002_idempotency_keys.py`):\n- Created `idempotency_keys` table with columns: tenant_id, endpoint, idempotency_key, request_hash, status (PENDING/SUCCESS/FAILURE), order_id, result_status, result_body, timestamps.\n- Unique constraint on `(tenant_id, endpoint, idempotency_key)` for scope isolation.\n\n**Model** (`stockflow/models.py`):\n- Added `IdempotencyKey` ORM model matching the migration.\n\n**Endpoint** (`stockflow/main.py`):\n- Added `Idempotency-Key` header dependency (required, ASCII 1-128 chars).\n- Request body normalization (sorted items by product_id, canonical JSON) with SHA-256 hashing for conflict detection.\n- `SELECT ... FOR UPDATE` on idempotency record for concurrency control (serializes same-key access).\n- Cache hit on SUCCESS → re-fetches original order by stored `order_id`, returns 201 without re-deducting stock.\n- Same key + different normalized body → 409 `IDEMPOTENCY_CONFLICT`.\n- Success → stores `order_id` and result JSON in idempotency record.\n- Failure (validation/stock/rollback) → marks record as FAILURE, not recorded as success; allows retry with same key.\n- Scope includes `tenant_id`, so different tenants can use the same key value.\n\nChecks run: syntax ✅, compose-config ✅, public-tests (connection refused — expected, requires live server).",
+        "turns": 31,
+        "last_prompt_tokens": 35865,
+        "prompt_tokens": 561030,
+        "completion_tokens": 16997,
+        "duration_seconds": 906.444
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 9,
+      "code_health_score": 85.0,
+      "workspace": "./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/controlled_cold_change/C02/workspace",
+      "run_dir": "./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/controlled_cold_change/C02",
+      "agent_status": "completed",
+      "turns": 31,
+      "prompt_tokens": 561030,
+      "completion_tokens": 16997,
+      "duration_seconds": 906.444
+    },
+    {
+      "model": "ornith:35b-q4_K_M",
+      "track": "controlled_cold_change",
+      "task": "C03",
+      "started_at": "2026-09-22T02:55:06.373424+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 0.6,
+          "top_p": 0.95,
+          "top_k": 20
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "completed",
+        "error": null,
+        "summary": "## 実装完了: 注文状態遷移 (C03)\n\n### 変更点: `stockflow/main.py`\n\n1. **`POST /orders/{id}/confirm` 追加** (183-199行)\n   - PENDING → CONFIRMED への遷移\n   - `with_for_update()` で行ロックし、競合時の安全性を確保\n   - 在庫操作なし（不変）\n\n2. **`POST /orders/{id}/ship` 追加** (202-218行)\n   - CONFIRMED → SHIPPED への遷移\n   - 同様に行ロックで競合安全\n   - 在庫操作なし（不変）\n\n3. **`POST /orders/{id}/cancel` 更新** (221-249行)\n   - PENDING / CONFIRMED の両方から CANCELED へ遷移可能に拡張\n   - 在庫復元ロジックは既存維持（一度だけ実行される）\n   - tenant_id フィルタを補完（セキュリティ修正）\n\n### 設計のポイント\n- **遷移テーブル**: `_ALLOWED_TRANSITIONS` を定義済み（将来拡張用）\n- **競合制御**: 全遷移で `with_for_update()` による行ロック\n- **409 INVALID_ORDER_STATE**: 許可されない遷移は全て409を返す\n- **tenant境界**: 既存の `tenant_id` 依存を維持・補完\n- **既存コントラクト**: 既存エンドポイントの応答形式・動作は変更なし\n\n### チェック結果\n- `syntax`: pass\n- `compose-config`: pass",
+        "turns": 9,
+        "last_prompt_tokens": 15039,
+        "prompt_tokens": 75250,
+        "completion_tokens": 2405,
+        "duration_seconds": 154.434
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 100,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/controlled_cold_change/C03/workspace",
+      "run_dir": "./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/controlled_cold_change/C03",
+      "agent_status": "completed",
+      "turns": 9,
+      "prompt_tokens": 75250,
+      "completion_tokens": 2405,
+      "duration_seconds": 154.434
+    },
+    {
+      "model": "ornith:35b-q4_K_M",
+      "track": "controlled_cold_change",
+      "task": "C04",
+      "started_at": "2026-09-22T03:02:20.252600+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 0.6,
+          "top_p": 0.95,
+          "top_k": 20
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "completed",
+        "error": null,
+        "summary": "Implemented the transactional outbox pattern for StockFlow:\n\n**New files:**\n- `alembic/versions/0002_outbox_events.py` — migration creating `outbox_events` table with columns: `id`, `event_type`, `aggregate_id`, `occurred_at`, `payload`, `attempts`, `last_error`, `sent_at`, `created_at`, `updated_at`\n- `stockflow/outbox_worker.py` — CLI worker (`python -m stockflow.outbox_worker --once`) that:\n  - Claims unsent events via `SELECT ... FOR UPDATE SKIP LOCKED` (prevents duplicate claims across workers)\n  - POSTs to `EVENT_PUBLISH_URL` with JSON body (`event_id`, `event_type`, `aggregate_id`, `occurred_at`, `payload`) and `Idempotency-Key` header set to `event_id`\n  - On 2xx: sets `sent_at`\n  - On failure: increments `attempts` and records `last_error`, leaving event unsent\n  - Supports both `--once` (single pass) and polling loop modes\n\n**Modified files:**\n- `stockflow/models.py` — added `OutboxEvent` SQLAlchemy model\n- `stockflow/main.py` — `create_order` and `cancel_order` now insert `OutboxEvent` (`order.created` / `order.canceled`) within the same DB transaction as the domain update, ensuring atomicity (rollback = no event)\n\n**Checks run:** syntax ✅, compose-config ✅",
+        "turns": 30,
+        "last_prompt_tokens": 28939,
+        "prompt_tokens": 444580,
+        "completion_tokens": 7112,
+        "duration_seconds": 419.723
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 100,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/controlled_cold_change/C04/workspace",
+      "run_dir": "./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/controlled_cold_change/C04",
+      "agent_status": "completed",
+      "turns": 30,
+      "prompt_tokens": 444580,
+      "completion_tokens": 7112,
+      "duration_seconds": 419.723
+    },
+    {
+      "model": "ornith:35b-q4_K_M",
+      "track": "controlled_cold_change",
+      "task": "C05",
+      "started_at": "2026-09-22T03:28:15.166388+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 0.6,
+          "top_p": 0.95,
+          "top_k": 20
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "context_exceeded",
+        "error": null,
+        "summary": "",
+        "turns": 13,
+        "last_prompt_tokens": 38302,
+        "prompt_tokens": 318751,
+        "completion_tokens": 29722,
+        "duration_seconds": 1542.934
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "error",
+      "capability_score": 0,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/controlled_cold_change/C05/workspace",
+      "run_dir": "./results/20260922T020250505689Z-ornith-35b-q4_K_M/runs/ornith-35b-q4_K_M/controlled_cold_change/C05"
+    }
+  ]
+}

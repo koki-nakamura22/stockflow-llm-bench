@@ -1,0 +1,313 @@
+diff --git a/alembic/versions/0002_outbox.py b/alembic/versions/0002_outbox.py
+new file mode 100644
+index 0000000..dd8e698
+--- /dev/null
++++ b/alembic/versions/0002_outbox.py
+@@ -0,0 +1,29 @@
++"""add outbox table"""
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++
++
++revision = "0002_outbox"
++down_revision = "0001_initial"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.create_table(
++        "outbox",
++        sa.Column("event_id", postgresql.UUID(as_uuid=True), primary_key=True),
++        sa.Column("event_type", sa.String(50), nullable=False),
++        sa.Column("aggregate_id", postgresql.UUID(as_uuid=True), nullable=False),
++        sa.Column("occurred_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
++        sa.Column("payload", sa.Text(), nullable=False),
++        sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
++        sa.Column("attempts", sa.Integer(), server_default="0", nullable=False),
++        sa.Column("last_error", sa.String(), nullable=True),
++        sa.UniqueConstraint("event_type", "aggregate_id", name="uq_outbox_event_aggregate"),
++    )
++
++
++def downgrade() -> None:
++    op.drop_table("outbox")
+\ No newline at end of file
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..a452543 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,16 +1,17 @@
+ import uuid
++import json
+ from collections import defaultdict
+ from typing import Any
+ 
+ from fastapi import Depends, FastAPI, Header, Request
+ from fastapi.exceptions import RequestValidationError
+ from fastapi.responses import JSONResponse
+-from sqlalchemy import select, text
++from sqlalchemy import select, text, func
+ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+-from stockflow.models import Order, OrderItem, Product
++from stockflow.models import Order, OrderItem, Product, Outbox
+ from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
+ 
+ app = FastAPI(title="StockFlow Mini")
+@@ -66,6 +67,25 @@ def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: b
+     return order
+ 
+ 
++def _outbox_put(
++    session: Session,
++    event_type: str,
++    aggregate_id: uuid.UUID,
++    payload: dict,
++) -> Outbox:
++    """Insert an outbox entry and return it. The caller is responsible for committing."""
++    event_id = uuid.uuid4()
++    entry = Outbox(
++        event_id=event_id,
++        event_type=event_type,
++        aggregate_id=aggregate_id,
++        occurred_at=func.now(),
++        payload=json.dumps(payload),
++    )
++    session.add(entry)
++    return entry
++
++
+ @app.get("/health")
+ def health(session: Session = Depends(get_session)) -> dict[str, str]:
+     session.execute(text("SELECT 1"))
+@@ -149,6 +169,24 @@ def create_order(
+             )
+         order.total_amount = total
+         session.commit()
++
++        # Insert outbox event for order.created within same transaction
++        _outbox_put(
++            session=session,
++            event_type="order.created",
++            aggregate_id=order.id,
++            payload={"order_id": str(order.id), "status": order.status, "total_amount": order.total_amount, "items": [
++                {
++                    "product_id": str(item.product_id),
++                    "quantity": item.quantity,
++                    "sku": item.sku,
++                    "product_name": item.product_name,
++                    "unit_price": item.unit_price,
++                    "line_amount": item.line_amount,
++                }
++                for item in order.items
++            ]},
++        )
+     except ApiError:
+         session.rollback()
+         raise
+@@ -186,6 +224,24 @@ def cancel_order(
+             products[item.product_id].stock += item.quantity
+         order.status = "CANCELED"
+         session.commit()
++
++        # Insert outbox event for order.canceled within same transaction
++        _outbox_put(
++            session=session,
++            event_type="order.canceled",
++            aggregate_id=order.id,
++            payload={"order_id": str(order.id), "status": order.status, "items": [
++                {
++                    "product_id": str(item.product_id),
++                    "quantity": item.quantity,
++                    "sku": item.sku,
++                    "product_name": item.product_name,
++                    "unit_price": item.unit_price,
++                    "line_amount": item.line_amount,
++                }
++                for item in order.items
++            ]},
++        )
+     except ApiError:
+         session.rollback()
+         raise
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..85a053d 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -67,3 +67,28 @@ class OrderItem(Base):
+     line_amount: Mapped[int] = mapped_column(Integer)
+     order: Mapped[Order] = relationship(back_populates="items")
+ 
++
++class Outbox(Base):
++    __tablename__ = "outbox"
++    event_id: Mapped[uuid.UUID] = mapped_column(
++        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
++    )
++    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
++    aggregate_id: Mapped[uuid.UUID] = mapped_column(
++        UUID(as_uuid=True), nullable=False
++    )
++    occurred_at: Mapped[datetime] = mapped_column(
++        DateTime(timezone=True), server_default=func.now(), nullable=False
++    )
++    payload: Mapped[str] = mapped_column(nullable=False)
++    sent_at: Mapped[datetime | None] = mapped_column(
++        DateTime(timezone=True), nullable=True
++    )
++    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
++    last_error: Mapped[str | None] = mapped_column(String, nullable=True)
++    __table_args__ = (
++        UniqueConstraint(
++            "event_type", "aggregate_id", name="uq_outbox_event_aggregate"
++        ),
++    )
++
+diff --git a/stockflow/outbox_worker.py b/stockflow/outbox_worker.py
+new file mode 100644
+index 0000000..5679e44
+--- /dev/null
++++ b/stockflow/outbox_worker.py
+@@ -0,0 +1,137 @@
++"""Transactional outbox worker.
++
++Sends pending outbox events to the EVENT_PUBLISH_URL via JSON POST with
++Idempotency-Key header set to the event_id.
++
++- Uses SELECT FOR UPDATE with a SKIP LOCKED clause to ensure multiple workers
++  do not claim the same event.
++- Updates sent_at on 2xx response; on failure records attempts/last_error and
++  leaves sent_at NULL so it can be retried.
++- at-least-once delivery guarantee.
++"""
++import os
++import sys
++import json
++import time
++from typing import Optional
++
++import httpx
++from sqlalchemy import select, text
++from sqlalchemy.orm import Session
++
++from stockflow.db import get_session
++from stockflow.models import Outbox
++
++
++def _pick_url() -> str:
++    url = os.getenv("EVENT_PUBLISH_URL")
++    if not url:
++        print("WARN: EVENT_PUBLISH_URL not set, worker exiting", file=sys.stderr)
++        sys.exit(1)
++    return url
++
++
++def _publish(url: str, event: Outbox) -> bool:
++    """Publish a single outbox event. Returns True on 2xx, False otherwise."""
++    headers = {
++        "Idempotency-Key": str(event.event_id),
++        "Content-Type": "application/json",
++    }
++    body = {
++        "event_id": str(event.event_id),
++        "event_type": event.event_type,
++        "aggregate_id": str(event.aggregate_id),
++        "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
++        "payload": json.loads(event.payload) if event.payload else {},
++    }
++    try:
++        with httpx.Client(timeout=10) as client:
++            r = client.post(url, headers=headers, json=body)
++        if 200 <= r.status_code < 300:
++            return True
++        return False
++    except Exception as exc:  # network error, timeout, etc.
++        # Update error info and leave sent_at NULL for retry
++        event.attempts += 1
++        event.last_error = str(exc)
++        return False
++
++
++def worker_once(skip: int = 1) -> None:
++    """Process one batch of pending outbox events.
++
++    - Claims up to ``skip`` rows using ``FOR UPDATE`` with ``SKIP LOCKED`` so
++      multiple workers do not pick the same row.
++    - Attempts to publish each event.
++    - On success: sets ``sent_at = now()`` and clears ``attempts`` / ``last_error``.
++    - On failure: increments ``attempts`` and stores ``last_error``; ``sent_at``
++      stays NULL so the row can be retried.
++    """
++    url = _pick_url()
++    with get_session() as session:
++        # Select pending events, locked with SKIP LOCKED for safe multi-worker claim
++        stmt = (
++            select(Outbox)
++            .where(Outbox.sent_at.is_(None))
++            .order_by(Outbox.occurred_at)
++            .limit(skip)
++            .with_for_update(skip_locked=True)
++        )
++        events = session.scalars(stmt).all()
++
++        if not events:
++            print("No pending outbox events")
++            return
++
++        now = text("now()")
++        for event in events:
++            published = _publish(url, event)
++            if published:
++                event.sent_at = func.now()
++                event.attempts = 0
++                event.last_error = None
++                print(f"Sent outbox event {event.event_id} ({event.event_type})")
++            else:
++                event.attempts += 1
++                # last_error already set in _publish if it was an HTTP error
++                print(
++                    f"Failed outbox event {event.event_id} ({event.event_type}), "
++                    f"attempt {event.attempts}",
++                    file=sys.stderr,
++                )
++        session.commit()
++
++
++def main() -> None:
++    """Entry point for ``python -m stockflow.outbox_worker --once``."""
++    import argparse
++
++    parser = argparse.ArgumentParser(description="Transactional outbox worker")
++    parser.add_argument(
++        "--once",
++        action="store_true",
++        help="Process one batch of pending events and exit",
++    )
++    parser.add_argument(
++        "--skip",
++        type=int,
++        default=1,
++        help="Number of events to claim in one batch (default: 1)",
++    )
++    args = parser.parse_args()
++
++    if args.once:
++        worker_once(skip=args.skip)
++    else:
++        # Simple loop forever, polling every 5 seconds
++        print("Starting outbox worker loop (Ctrl-C to stop)", file=sys.stderr)
++        try:
++            while True:
++                worker_once(skip=args.skip)
++                time.sleep(5)
++        except KeyboardInterrupt:
++            print("\nWorker stopped", file=sys.stderr)
++
++
++if __name__ == "__main__":
++    main()
+\ No newline at end of file

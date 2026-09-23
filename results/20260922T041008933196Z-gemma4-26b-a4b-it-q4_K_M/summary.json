@@ -1,0 +1,258 @@
+{
+  "schema_version": "1.0",
+  "runs": [
+    {
+      "model": "gemma4:26b-a4b-it-q4_K_M",
+      "track": "zero_to_one",
+      "task": "A00",
+      "started_at": "2026-09-22T04:28:52.091686+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "top_k": 64
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "max_turns",
+        "error": null,
+        "summary": "",
+        "turns": 40,
+        "last_prompt_tokens": 25120,
+        "prompt_tokens": 489743,
+        "completion_tokens": 18369,
+        "duration_seconds": 1049.959
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 0,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260922T041008933196Z-gemma4-26b-a4b-it-q4_K_M/runs/gemma4-26b-a4b-it-q4_K_M/zero_to_one/A00/workspace",
+      "run_dir": "./results/20260922T041008933196Z-gemma4-26b-a4b-it-q4_K_M/runs/gemma4-26b-a4b-it-q4_K_M/zero_to_one/A00",
+      "agent_status": "max_turns",
+      "turns": 40,
+      "prompt_tokens": 489743,
+      "completion_tokens": 18369,
+      "duration_seconds": 1049.959
+    },
+    {
+      "model": "gemma4:26b-a4b-it-q4_K_M",
+      "track": "controlled_cold_change",
+      "task": "C01",
+      "started_at": "2026-09-22T04:41:53.622242+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "top_k": 64
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "max_turns",
+        "error": null,
+        "summary": "",
+        "turns": 40,
+        "last_prompt_tokens": 28795,
+        "prompt_tokens": 661193,
+        "completion_tokens": 13059,
+        "duration_seconds": 768.028
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 25,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260922T041008933196Z-gemma4-26b-a4b-it-q4_K_M/runs/gemma4-26b-a4b-it-q4_K_M/controlled_cold_change/C01/workspace",
+      "run_dir": "./results/20260922T041008933196Z-gemma4-26b-a4b-it-q4_K_M/runs/gemma4-26b-a4b-it-q4_K_M/controlled_cold_change/C01",
+      "agent_status": "max_turns",
+      "turns": 40,
+      "prompt_tokens": 661193,
+      "completion_tokens": 13059,
+      "duration_seconds": 768.028
+    },
+    {
+      "model": "gemma4:26b-a4b-it-q4_K_M",
+      "track": "controlled_cold_change",
+      "task": "C02",
+      "started_at": "2026-09-22T05:05:48.303602+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "top_k": 64
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "context_exceeded",
+        "error": null,
+        "summary": "",
+        "turns": 37,
+        "last_prompt_tokens": 40967,
+        "prompt_tokens": 893005,
+        "completion_tokens": 22756,
+        "duration_seconds": 1422.896
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "error",
+      "capability_score": 0,
+      "code_health_score": 70.0,
+      "workspace": "./results/20260922T041008933196Z-gemma4-26b-a4b-it-q4_K_M/runs/gemma4-26b-a4b-it-q4_K_M/controlled_cold_change/C02/workspace",
+      "run_dir": "./results/20260922T041008933196Z-gemma4-26b-a4b-it-q4_K_M/runs/gemma4-26b-a4b-it-q4_K_M/controlled_cold_change/C02",
+      "agent_status": "context_exceeded",
+      "turns": 37,
+      "prompt_tokens": 893005,
+      "completion_tokens": 22756,
+      "duration_seconds": 1422.896
+    },
+    {
+      "model": "gemma4:26b-a4b-it-q4_K_M",
+      "track": "controlled_cold_change",
+      "task": "C03",
+      "started_at": "2026-09-22T05:18:55.322363+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "top_k": 64
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "completed",
+        "error": null,
+        "summary": "Implemented order state transitions (PENDING, CONFIRMED, SHIPPED, CANCELED) with appropriate status checks, inventory management during cancellation, and concurrency control using database locks.",
+        "turns": 29,
+        "last_prompt_tokens": 32366,
+        "prompt_tokens": 384153,
+        "completion_tokens": 12158,
+        "duration_seconds": 772.5
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 100,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260922T041008933196Z-gemma4-26b-a4b-it-q4_K_M/runs/gemma4-26b-a4b-it-q4_K_M/controlled_cold_change/C03/workspace",
+      "run_dir": "./results/20260922T041008933196Z-gemma4-26b-a4b-it-q4_K_M/runs/gemma4-26b-a4b-it-q4_K_M/controlled_cold_change/C03",
+      "agent_status": "completed",
+      "turns": 29,
+      "prompt_tokens": 384153,
+      "completion_tokens": 12158,
+      "duration_seconds": 772.5
+    },
+    {
+      "model": "gemma4:26b-a4b-it-q4_K_M",
+      "track": "controlled_cold_change",
+      "task": "C04",
+      "started_at": "2026-09-22T05:32:27.652546+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "top_k": 64
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "completed",
+        "error": null,
+        "summary": "Implemented transactional outbox pattern for order creation and cancellation. \n- Added `OutboxEvent` model and migration.\n- Updated `create_order` and `cancel_order` to insert events into the outbox within the same transaction.\n- Implemented `stockflow.outbox_worker` to process and publish events to `EVENT_PUBLISH_URL` with idempotency key.\n- Added support for `order.created` and `order.canceled` event types.\n- Ensured at-least-once delivery and concurrency safety using `SELECT FOR UPDATE SKIP LOCKED`.",
+        "turns": 33,
+        "last_prompt_tokens": 32132,
+        "prompt_tokens": 537044,
+        "completion_tokens": 12117,
+        "duration_seconds": 799.037
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 100,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260922T041008933196Z-gemma4-26b-a4b-it-q4_K_M/runs/gemma4-26b-a4b-it-q4_K_M/controlled_cold_change/C04/workspace",
+      "run_dir": "./results/20260922T041008933196Z-gemma4-26b-a4b-it-q4_K_M/runs/gemma4-26b-a4b-it-q4_K_M/controlled_cold_change/C04",
+      "agent_status": "completed",
+      "turns": 33,
+      "prompt_tokens": 537044,
+      "completion_tokens": 12117,
+      "duration_seconds": 799.037
+    },
+    {
+      "model": "gemma4:26b-a4b-it-q4_K_M",
+      "track": "controlled_cold_change",
+      "task": "C05",
+      "started_at": "2026-09-22T05:51:10.116211+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "top_k": 64
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "completed",
+        "error": null,
+        "summary": "Implemented a rolling migration for order amounts. \n- Added `subtotal_amount` and `tax_amount` to `orders` table and `OrderOut` schema.\n- Implemented `migrate-expand` to add columns and backfill data, maintaining compatibility.\n- Implemented `migrate-contract` to update `total_amount` to be tax-inclusive.\n- Updated `create_order` to populate the new columns.\n- Added `MIGRATION.md` with the migration plan.",
+        "turns": 31,
+        "last_prompt_tokens": 31851,
+        "prompt_tokens": 586273,
+        "completion_tokens": 18302,
+        "duration_seconds": 1108.591
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 100,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260922T041008933196Z-gemma4-26b-a4b-it-q4_K_M/runs/gemma4-26b-a4b-it-q4_K_M/controlled_cold_change/C05/workspace",
+      "run_dir": "./results/20260922T041008933196Z-gemma4-26b-a4b-it-q4_K_M/runs/gemma4-26b-a4b-it-q4_K_M/controlled_cold_change/C05"
+    }
+  ]
+}

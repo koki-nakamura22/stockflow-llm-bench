@@ -1,0 +1,163 @@
+diff --git a/MIGRATION.md b/MIGRATION.md
+new file mode 100644
+index 0000000..134197a
+--- /dev/null
++++ b/MIGRATION.md
+@@ -0,0 +1,34 @@
++# Migration Plan: Rolling Migration for Order Total Amount
++
++## Goal
++Expand `orders.total_amount` from tax-exclusive to include `subtotal_amount`, `tax_amount`, and tax-inclusive `total_amount` using a rolling migration strategy.
++
++## Phase 1: Expand
++**Command:** `make migrate-expand`
++
++**Changes:**
++- **Database:** 
++    - Add `subtotal_amount` and `tax_amount` columns to `orders` table (initially nullable).
++    - Backfill `subtotal_amount = total_amount` and `tax_amount = floor(total_amount * 0.10)`.
++    - `total_amount` column remains tax-exclusive.
++- **Application (New Version):**
++    - Update `Order` model to include `subtotal_amount` and `tax_amount`.
++    - Update `OrderOut` schema to include `subtotal_amount`, `tax_amount`, and tax-inclusive `total_amount`.
++    - Update `create_order` to populate `subtotal_amount` and `tax_amount` in the database.
++    - `OrderOut.total_amount` is computed as `subtotal_amount + tax_amount` in the API response.
++
++**Compatibility:**
++- Old App (Write): Still writes `total_amount` (tax-exclusive). New App's `create_order` will also populate the new columns.
++- Old App (Read): Reads `total_amount` (now tax-inclusive in API). While the value changes, the structure is preserved, and `subtotal_amount` is now available for clients that need the tax-exclusive amount.
++- Re-running `migrate-expand` is safe as the backfill uses `=` which is idempotent.
++
++## Phase 2: Contract
++**Command:** `make migrate-contract`
++(To be executed after the Old App is decommissioned)
++
++**Changes:**
++- **Database:**
++    - Update `total_amount` column to store tax-inclusive amount: `total_amount = total_amount + tax_amount`.
++    - Set `subtotal_amount` and `tax_amount` to `NOT NULL`.
++- **Application (New Version):**
++    - Update `create_order` to write the tax-inclusive amount to the `total_amount` column.
+diff --git a/Makefile b/Makefile
+index c37318d..6c25f18 100755
+--- a/Makefile
++++ b/Makefile
+@@ -1,6 +1,10 @@
+ .PHONY: migrate test lint typecheck
+ migrate:
+ 	alembic upgrade head
++migrate-expand:
++	alembic upgrade 0002_expand
++migrate-contract:
++	alembic upgrade 0003_contract
+ test:
+ 	pytest -q
+ lint:
+diff --git a/alembic/versions/0002_expand.py b/alembic/versions/0002_expand.py
+new file mode 100644
+index 0000000..6d1d932
+--- /dev/null
++++ b/alembic/versions/0002_expand.py
+@@ -0,0 +1,20 @@
++"""expand order amount fields"""
++from alembic import op
++import sqlalchemy as sa
++
++# revision = '0002_expand'
++# down_revision = '0001_initial'
++
++revision = "0002_expand"
++down_revision = "0001_initial"
++branch_labels = None
++depends_on = None
++
++def upgrade() -> None:
++    op.add_column('orders', sa.Column('subtotal_amount', sa.Integer(), nullable=True))
++    op.add_column('orders', sa.Column('tax_amount', sa.Integer(), nullable=True))
++    op.execute("UPDATE orders SET subtotal_amount = total_amount, tax_amount = floor(total_amount * 0.10)")
++
++def downgrade() -> None:
++    op.drop_column('orders', 'tax_amount')
++    op.drop_column('orders', 'subtotal_amount')
+diff --git a/alembic/versions/0003_contract.py b/alembic/versions/0003_contract.py
+new file mode 100644
+index 0000000..874e7ea
+--- /dev/null
++++ b/alembic/versions/0003_contract.py
+@@ -0,0 +1,21 @@
++"""contract order amount fields"""
++from alembic import op
++import sqlalchemy as sa
++
++# revision = '0003_contract'
++# down_revision = '0002_expand'
++
++revision = "0003_contract"
++down_revision = "0002_expand"
++branch_labels = None
++depends_on = None
++
++def upgrade() -> None:
++    op.execute("UPDATE orders SET total_amount = total_amount + tax_amount")
++    op.alter_column('orders', 'subtotal_amount', nullable=False)
++    op.alter_column('orders', 'tax_amount', nullable=False)
++
++def downgrade() -> None:
++    op.alter_column('orders', 'subtotal_amount', nullable=True)
++    op.alter_column('orders', 'tax_amount', nullable=True)
++    op.execute("UPDATE orders SET total_amount = total_amount - tax_amount")
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..1a1f5a1 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -148,6 +148,8 @@ def create_order(
+                 )
+             )
+         order.total_amount = total
++        order.subtotal_amount = total
++        order.tax_amount = int(total * 0.10)
+         session.commit()
+     except ApiError:
+         session.rollback()
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..3ff6d8d 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -38,6 +38,8 @@ class Order(Base):
+     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+     status: Mapped[str] = mapped_column(String(20), default="PENDING")
+     total_amount: Mapped[int] = mapped_column(Integer)
++    subtotal_amount: Mapped[int] = mapped_column(Integer, nullable=True)
++    tax_amount: Mapped[int] = mapped_column(Integer, nullable=True)
+     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+     updated_at: Mapped[datetime] = mapped_column(
+         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..9a6b8fb 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -1,7 +1,7 @@
+ import uuid
+ from datetime import datetime
+ 
+-from pydantic import BaseModel, ConfigDict, Field
++from pydantic import BaseModel, ConfigDict, Field, model_validator
+ 
+ 
+ class ProductCreate(BaseModel):
+@@ -45,8 +45,15 @@ class OrderOut(BaseModel):
+     id: uuid.UUID
+     tenant_id: uuid.UUID
+     status: str
++    subtotal_amount: int
++    tax_amount: int
+     total_amount: int
+     created_at: datetime
+     updated_at: datetime
+     items: list[OrderItemOut]
+ 
++    @model_validator(mode='after')
++    def compute_total_amount(self) -> 'OrderOut':
++        self.total_amount = self.subtotal_amount + self.tax_amount
++        return self
++

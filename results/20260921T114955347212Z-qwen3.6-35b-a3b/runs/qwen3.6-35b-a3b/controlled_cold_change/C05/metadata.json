@@ -1,0 +1,39 @@
+{
+  "model": "qwen3.6:35b-a3b",
+  "track": "controlled_cold_change",
+  "task": "C05",
+  "started_at": "2026-09-21T12:41:31.007547+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repeat_penalty": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "## C05 Rolling Migration Implementation Complete\n\n### Changes Made:\n\n1. **MIGRATION.md** - Created with design decisions documented:\n   - `tax_amount = floor(subtotal_amount * 0.10)`\n   - `total_amount = subtotal_amount + tax_amount`\n   - Expand/contract as separate revisions\n   - Backward compatibility during expand phase\n   - Re-execution safety (no double-counting)\n   - No amount specification in API requests\n\n2. **alembic/versions/0002_expand_tax_columns.py** - Expand migration:\n   - Adds `subtotal_amount` and `tax_amount` columns (nullable=False, default=0)\n   - Backfills existing rows: `subtotal_amount = total_amount`, `tax_amount = FLOOR(subtotal_amount * 0.10)`\n\n3. **alembic/versions/0003_contract_tax_columns.py** - Contract migration:\n   - Sets physical `total_amount = subtotal_amount + tax_amount` (tax-inclusive)\n   - Drops `subtotal_amount` and `tax_amount` columns\n\n4. **stockflow/models.py** - Added `subtotal_amount` and `tax_amount` fields to Order model\n\n5. **stockflow/schemas.py** - Added `subtotal_amount` and `tax_amount` to OrderOut, with computed `total_amount` via `@model_validator`\n\n6. **stockflow/main.py** - Updated create_order to:\n   - Calculate `tax_amount = math.floor(subtotal * 0.10)`\n   - Write `subtotal_amount`, `tax_amount`, and `total_amount` (backward compat)\n   - API response returns `total_amount = subtotal_amount + tax_amount`\n\n7. **Makefile** - Added `migrate-expand` and `migrate-contract` commands\n\n### Checks Run:\n- syntax: pass (9 files)\n- compose-config: pass\n- public-tests: N/A (requires running Docker containers)",
+    "turns": 29,
+    "last_prompt_tokens": 30090,
+    "prompt_tokens": 444299,
+    "completion_tokens": 9166,
+    "duration_seconds": 554.092
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 100,
+  "code_health_score": 100.0
+}

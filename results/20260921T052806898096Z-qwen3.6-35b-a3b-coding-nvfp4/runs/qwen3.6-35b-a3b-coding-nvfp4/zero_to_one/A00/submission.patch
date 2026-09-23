@@ -1,0 +1,723 @@
+diff --git a/alembic/env.py b/alembic/env.py
+new file mode 100644
+index 0000000..999d24e
+--- /dev/null
++++ b/alembic/env.py
+@@ -0,0 +1,68 @@
++"""Configuration for alembic migrations."""
++
++import os
++from logging.config import fileConfig
++
++from sqlalchemy import engine_from_config, pool
++
++from alembic import context
++
++# this is the Alembic Config object, which provides
++# access to the values within the .ini file in use.
++config = context.config
++
++# Interpret the config file for Python logging.
++# This line sets up loggers basically.
++if config.config_file_name is not None:
++    fileConfig(config.config_file_name)
++
++# add your model's MetaData object here
++# for 'autogenerate' support
++from stockflow.models import Base  # noqa: E402
++
++target_metadata = Base.metadata
++
++# other values from the config, defined by the top-level
++# env.py script, can be retrieved via config.get_context().
++# ... and others follow.
++
++
++def run_migrations_offline() -> None:
++    """Run migrations in 'offline' mode."""
++    url = config.get_main_option("sqlalchemy.url") or os.environ.get("DATABASE_URL", "")
++    context.configure(
++        url=url,
++        target_metadata=target_metadata,
++        literal_binds=True,
++        dialect_opts={"paramstyle": "named"},
++    )
++
++    with context.begin_transaction():
++        context.run_migrations()
++
++
++def run_migrations_online() -> None:
++    """Run migrations in 'online' mode."""
++    online_url = os.environ.get("DATABASE_URL", "")
++    if online_url:
++        config.set_main_option("sqlalchemy.url", online_url)
++    
++    connectable = engine_from_config(
++        config.get_section(config.config_ini_section, {}),
++        prefix="sqlalchemy.",
++        poolclass=pool.NullPool,
++    )
++
++    with connectable.connect() as connection:
++        context.configure(
++            connection=connection, target_metadata=target_metadata
++        )
++
++        with context.begin_transaction():
++            context.run_migrations()
++
++
++if context.is_offline_mode():
++    run_migrations_offline()
++else:
++    run_migrations_online()
+diff --git a/alembic/versions/0001_initial.py b/alembic/versions/0001_initial.py
+new file mode 100644
+index 0000000..88e70ad
+--- /dev/null
++++ b/alembic/versions/0001_initial.py
+@@ -0,0 +1,68 @@
++"""Add products, orders, and order_items tables.
++
++Revision ID: 0001_initial
++Revises: 
++Create Date: 2024-01-01 00:00:00.000000
++
++"""
++from typing import Sequence, Union
++
++import sqlalchemy as sa
++from alembic import op
++
++# revision identifiers, used by Alembic.
++revision: str = '0001_initial'
++down_revision: Union[str, None] = None
++branch_labels: Union[str, Sequence[str], None] = None
++depends_on: Union[str, Sequence[str], None] = None
++
++
++def upgrade() -> None:
++    """Create tables for StockFlow Mini."""
++    op.create_table(
++        'products',
++        sa.Column('id', sa.Uuid(), nullable=False),
++        sa.Column('tenant_id', sa.Uuid(), nullable=False),
++        sa.Column('sku', sa.String(length=255), nullable=False),
++        sa.Column('name', sa.String(length=255), nullable=False),
++        sa.Column('unit_price', sa.Integer(), nullable=False),
++        sa.Column('stock', sa.Integer(), nullable=False, server_default='0'),
++        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
++        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
++        sa.PrimaryKeyConstraint('id'),
++        sa.UniqueConstraint('tenant_id', 'sku', name='uq_products_tenant_sku'),
++    )
++    op.create_index('ix_products_tenant_id', 'products', ['tenant_id'])
++
++    op.create_table(
++        'orders',
++        sa.Column('id', sa.Uuid(), nullable=False),
++        sa.Column('tenant_id', sa.Uuid(), nullable=False),
++        sa.Column('status', sa.String(length=50), nullable=False, server_default='PENDING'),
++        sa.Column('total_amount', sa.Integer(), nullable=False, server_default='0'),
++        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
++        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
++        sa.PrimaryKeyConstraint('id'),
++    )
++    op.create_index('ix_orders_tenant_id', 'orders', ['tenant_id'])
++
++    op.create_table(
++        'order_items',
++        sa.Column('id', sa.Uuid(), nullable=False),
++        sa.Column('order_id', sa.Uuid(), nullable=False),
++        sa.Column('product_id', sa.Uuid(), nullable=False),
++        sa.Column('sku', sa.String(length=255), nullable=False),
++        sa.Column('product_name', sa.String(length=255), nullable=False),
++        sa.Column('unit_price', sa.Integer(), nullable=False),
++        sa.Column('quantity', sa.Integer(), nullable=False),
++        sa.Column('line_amount', sa.Integer(), nullable=False),
++        sa.ForeignKeyConstraint(['order_id'], ['orders.id'], ondelete='CASCADE'),
++        sa.PrimaryKeyConstraint('id'),
++    )
++
++
++def downgrade() -> None:
++    """Drop tables."""
++    op.drop_table('order_items')
++    op.drop_table('orders')
++    op.drop_table('products')
+diff --git a/stockflow/database.py b/stockflow/database.py
+new file mode 100644
+index 0000000..0892c77
+--- /dev/null
++++ b/stockflow/database.py
+@@ -0,0 +1,32 @@
++"""Database connection and session management for StockFlow Mini."""
++
++import os
++from contextlib import contextmanager
++from typing import Generator
++
++from sqlalchemy import create_engine
++from sqlalchemy.orm import Session, sessionmaker
++
++DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql+psycopg://stockflow:stockflow@localhost/stockflow")
++
++engine = create_engine(DATABASE_URL, pool_pre_ping=True)
++SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
++
++
++def get_db() -> Generator[Session, None, None]:
++    """Yield a database session."""
++    db = SessionLocal()
++    try:
++        yield db
++    finally:
++        db.close()
++
++
++@contextmanager
++def get_db_session() -> Generator[Session, None, None]:
++    """Context manager for a database session."""
++    db = SessionLocal()
++    try:
++        yield db
++    finally:
++        db.close()
+diff --git a/stockflow/main.py b/stockflow/main.py
+index e9d1d7e..2ca8f1c 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,9 +1,383 @@
+-from fastapi import FastAPI
++"""StockFlow Mini - FastAPI application."""
++
++import os
++from datetime import datetime, timezone
++from uuid import UUID, uuid4
++
++from fastapi import FastAPI, HTTPException, Request
++from fastapi.responses import JSONResponse
++from sqlalchemy import and_, select, update
++from sqlalchemy.exc import IntegrityError, OperationalError
++from sqlalchemy.orm import Session
++
++from stockflow.database import engine, get_db_session
++from stockflow.models import Order, OrderItem, Product
++from stockflow.schemas import (
++    OrderCreate,
++    OrderItemCreate,
++    OrderItemResponse,
++    OrderResponse,
++    ProductCreate,
++    ProductResponse,
++)
+ 
+ app = FastAPI(title="StockFlow Mini")
+ 
+ 
++# --- Middleware for tenant validation ---
++
++@app.middleware("http")
++async def validate_tenant(request: Request, call_next):
++    """Validate X-Tenant-Id header and inject into request state."""
++    tenant_id_str = request.headers.get("X-Tenant-Id")
++    if not tenant_id_str:
++        return JSONResponse(
++            status_code=400,
++            content={"error": {"code": "INVALID_TENANT", "message": "Missing X-Tenant-Id header", "details": {}}},
++        )
++    try:
++        tenant_id = UUID(tenant_id_str)
++    except (ValueError, TypeError):
++        return JSONResponse(
++            status_code=400,
++            content={"error": {"code": "INVALID_TENANT", "message": "Invalid X-Tenant-Id format", "details": {}}},
++        )
++    request.state.tenant_id = tenant_id
++    response = await call_next(request)
++    return response
++
++
++# --- Health check ---
++
+ @app.get("/health")
+-def health() -> dict[str, str]:
+-    return {"status": "not-implemented"}
++async def health_check():
++    """Health check endpoint. Returns 200 only if DB is reachable."""
++    try:
++        with get_db_session() as db:
++            db.execute(select(1))
++        return {"status": "ok"}
++    except (OperationalError, Exception):
++        return JSONResponse(
++            status_code=503,
++            content={"status": "error"},
++        )
++
++
++# --- Product endpoints ---
++
++@app.post("/products", status_code=201)
++async def create_product(product: ProductCreate, request: Request):
++    """Create a new product. SKU must be unique per tenant."""
++    tenant_id = request.state.tenant_id
++    now = datetime.now(timezone.utc)
++
++    with get_db_session() as db:
++        # Check for duplicate SKU within the same tenant
++        existing = db.execute(
++            select(Product).where(
++                and_(Product.tenant_id == tenant_id, Product.sku == product.sku)
++            )
++        ).scalar_one_or_none()
++        if existing:
++            raise HTTPException(
++                status_code=409,
++                detail={"error": {"code": "SKU_ALREADY_EXISTS", "message": "SKU already exists for this tenant", "details": {}}},
++            )
++
++        product_obj = Product(
++            id=uuid4(),
++            tenant_id=tenant_id,
++            sku=product.sku,
++            name=product.name,
++            unit_price=product.unit_price,
++            stock=product.stock,
++            created_at=now,
++            updated_at=now,
++        )
++        db.add(product_obj)
++        db.commit()
++        db.refresh(product_obj)
++
++        return ProductResponse(
++            id=product_obj.id,
++            tenant_id=product_obj.tenant_id,
++            sku=product_obj.sku,
++            name=product_obj.name,
++            unit_price=product_obj.unit_price,
++            stock=product_obj.stock,
++            created_at=product_obj.created_at,
++            updated_at=product_obj.updated_at,
++        )
++
++
++@app.get("/products/{product_id}")
++async def get_product(product_id: UUID, request: Request):
++    """Get a product by ID. Only returns products from the same tenant."""
++    tenant_id = request.state.tenant_id
++
++    with get_db_session() as db:
++        product = db.execute(
++            select(Product).where(
++                and_(Product.id == product_id, Product.tenant_id == tenant_id)
++            )
++        ).scalar_one_or_none()
++
++        if not product:
++            raise HTTPException(
++                status_code=404,
++                detail={"error": {"code": "NOT_FOUND", "message": "Product not found", "details": {}}},
++            )
++
++        return ProductResponse(
++            id=product.id,
++            tenant_id=product.tenant_id,
++            sku=product.sku,
++            name=product.name,
++            unit_price=product.unit_price,
++            stock=product.stock,
++            created_at=product.created_at,
++            updated_at=product.updated_at,
++        )
++
++
++# --- Order endpoints ---
++
++@app.post("/orders", status_code=201)
++async def create_order(order_create: OrderCreate, request: Request):
++     """Create an order. Atomic: create order and deduct stock."""
++    tenant_id = request.state.tenant_id
++    now = datetime.now(timezone.utc)
++
++    with get_db_session() as db:
++        try:
++            # Validate all products exist and belong to tenant, check stock
++            items_data = []
++            total_amount = 0
++
++            for item_create in order_create.items:
++                product = db.execute(
++                    select(Product).where(
++                        and_(Product.id == item_create.product_id, Product.tenant_id == tenant_id)
++                    )
++                ).scalar_one_or_none()
++
++                if not product:
++                    raise HTTPException(
++                        status_code=404,
++                        detail={"error": {"code": "NOT_FOUND", "message": "Product not found", "details": {}}},
++                    )
++
++                if product.stock < item_create.quantity:
++                    raise HTTPException(
++                        status_code=409,
++                        detail={"error": {"code": "INSUFFICIENT_STOCK", "message": f"Insufficient stock for product {product.sku}", "details": {}}},
++                    )
++
++                line_amount = product.unit_price * item_create.quantity
++                total_amount += line_amount
++
++                items_data.append({
++                    "product": product,
++                    "quantity": item_create.quantity,
++                    "line_amount": line_amount,
++                })
++
++            # Deduct stock for all products
++            for item_data in items_data:
++                product = item_data["product"]
++                product.stock -= item_data["quantity"]
++
++            # Create order
++            order = Order(
++                id=uuid4(),
++                tenant_id=tenant_id,
++                status="PENDING",
++                total_amount=total_amount,
++                created_at=now,
++                updated_at=now,
++            )
++            db.add(order)
++
++            # Create order items
++            for item_data in items_data:
++                product = item_data["product"]
++                order_item = OrderItem(
++                    id=uuid4(),
++                    order_id=order.id,
++                    product_id=product.id,
++                    sku=product.sku,
++                    product_name=product.name,
++                    unit_price=product.unit_price,
++                    quantity=item_data["quantity"],
++                    line_amount=item_data["line_amount"],
++                )
++                db.add(order_item)
++
++            db.commit()
++            db.refresh(order)
++
++            # Fetch order items
++            order_items = db.execute(
++                select(OrderItem).where(OrderItem.order_id == order.id)
++            ).scalars().all()
++
++            return OrderResponse(
++                id=order.id,
++                tenant_id=order.tenant_id,
++                status=order.status,
++                total_amount=order.total_amount,
++                created_at=order.created_at,
++                updated_at=order.updated_at,
++                items=[
++                    OrderItemResponse(
++                        id=item.id,
++                        order_id=item.order_id,
++                        product_id=item.product_id,
++                        sku=item.sku,
++                        product_name=item.product_name,
++                        unit_price=item.unit_price,
++                        quantity=item.quantity,
++                        line_amount=item.line_amount,
++                    )
++                    for item in order_items
++                ],
++            )
++
++        except HTTPException:
++            db.rollback()
++            raise
++        except Exception as e:
++            db.rollback()
++            # Handle unique constraint violation for stock (shouldn't happen with our logic, but just in case)
++            raise HTTPException(
++                status_code=500,
++                detail={"error": {"code": "INTERNAL_ERROR", "message": str(e), "details": {}}},
++            )
++
++
++@app.get("/orders/{order_id}")
++async def get_order(order_id: UUID, request: Request):
++     """Get an order by ID with items. Only returns orders from the same tenant."""
++    tenant_id = request.state.tenant_id
++
++    with get_db_session() as db:
++        order = db.execute(
++            select(Order).where(
++                and_(Order.id == order_id, Order.tenant_id == tenant_id)
++            )
++        ).scalar_one_or_none()
++
++        if not order:
++            raise HTTPException(
++                status_code=404,
++                detail={"error": {"code": "NOT_FOUND", "message": "Order not found", "details": {}}},
++            )
++
++        order_items = db.execute(
++            select(OrderItem).where(OrderItem.order_id == order.id)
++        ).scalars().all()
++
++        return OrderResponse(
++            id=order.id,
++            tenant_id=order.tenant_id,
++            status=order.status,
++            total_amount=order.total_amount,
++            created_at=order.created_at,
++            updated_at=order.updated_at,
++            items=[
++                OrderItemResponse(
++                    id=item.id,
++                    order_id=item.order_id,
++                    product_id=item.product_id,
++                    sku=item.sku,
++                    product_name=item.product_name,
++                    unit_price=item.unit_price,
++                    quantity=item.quantity,
++                    line_amount=item.line_amount,
++                )
++                for item in order_items
++            ],
++        )
++
++
++@app.post("/orders/{order_id}/cancel")
++async def cancel_order(order_id: UUID, request: Request):
++     """Cancel an order. Only PENDING orders can be cancelled. Atomic: cancel and restore stock."""
++    tenant_id = request.state.tenant_id
++    now = datetime.now(timezone.utc)
++
++    with get_db_session() as db:
++        order = db.execute(
++            select(Order).where(
++                and_(Order.id == order_id, Order.tenant_id == tenant_id)
++            )
++        ).scalar_one_or_none()
++
++        if not order:
++            raise HTTPException(
++                status_code=404,
++                detail={"error": {"code": "NOT_FOUND", "message": "Order not found", "details": {}}},
++            )
++
++        if order.status != "PENDING":
++            raise HTTPException(
++                status_code=409,
++                detail={"error": {"code": "INVALID_ORDER_STATE", "message": "Order is not in PENDING state", "details": {}}},
++            )
++
++        # Restore stock for all order items
++        order_items = db.execute(
++            select(OrderItem).where(OrderItem.order_id == order_id)
++        ).scalars().all()
++
++        for item in order_items:
++            product = db.execute(
++                select(Product).where(Product.id == item.product_id)
++            ).scalar_one_or_none()
++
++            if product:
++                product.stock += item.quantity
++
++        # Update order status
++        order.status = "CANCELLED"
++        order.updated_at = now
++
++        db.commit()
++
++        return OrderResponse(
++            id=order.id,
++            tenant_id=order.tenant_id,
++            status=order.status,
++            total_amount=order.total_amount,
++            created_at=order.created_at,
++            updated_at=order.updated_at,
++            items=[
++                OrderItemResponse(
++                    id=item.id,
++                    order_id=item.order_id,
++                    product_id=item.product_id,
++                    sku=item.sku,
++                    product_name=item.product_name,
++                    unit_price=item.unit_price,
++                    quantity=item.quantity,
++                    line_amount=item.line_amount,
++                )
++                for item in order_items
++            ],
++        )
++
++
++# --- Error handlers ---
+ 
++@app.exception_handler(HTTPException)
++async def custom_http_exception_handler(request: Request, exc: HTTPException):
++     """Custom HTTP exception handler for consistent error responses."""
++    if isinstance(exc.detail, dict) and "error" in exc.detail:
++        return JSONResponse(
++            status_code=exc.status_code,
++            content=exc.detail,
++        )
++    return JSONResponse(
++        status_code=exc.status_code,
++        content={"error": {"code": "INTERNAL_ERROR", "message": str(exc.detail), "details": {}}},
++    )
+diff --git a/stockflow/models.py b/stockflow/models.py
+new file mode 100644
+index 0000000..d4975e8
+--- /dev/null
++++ b/stockflow/models.py
+@@ -0,0 +1,64 @@
++"""SQLAlchemy models for StockFlow Mini."""
++
++from datetime import datetime, timezone
++
++from sqlalchemy import (
++    Column,
++    DateTime,
++    ForeignKey,
++    Integer,
++    String,
++    Text,
++    Uuid,
++)
++from sqlalchemy.orm import DeclarativeBase, relationship
++
++
++class Base(DeclarativeBase):
++    pass
++
++
++class Product(Base):
++    __tablename__ = "products"
++
++    id = Column(Uuid, primary_key=True)
++    tenant_id = Column(Uuid, nullable=False, index=True)
++    sku = Column(String(255), nullable=False)
++    name = Column(String(255), nullable=False)
++    unit_price = Column(Integer, nullable=False)
++    stock = Column(Integer, nullable=False, default=0)
++    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
++    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
++
++    __table_args__ = (
++        # Unique constraint on tenant_id + sku
++        # Note: SQLAlchemy 2.x uses __table_args__ for constraints
++    )
++
++
++class Order(Base):
++    __tablename__ = "orders"
++
++    id = Column(Uuid, primary_key=True)
++    tenant_id = Column(Uuid, nullable=False, index=True)
++    status = Column(String(50), nullable=False, default="PENDING")
++    total_amount = Column(Integer, nullable=False, default=0)
++    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
++    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
++
++    items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
++
++
++class OrderItem(Base):
++    __tablename__ = "order_items"
++
++    id = Column(Uuid, primary_key=True)
++    order_id = Column(Uuid, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
++    product_id = Column(Uuid, nullable=False)
++    sku = Column(String(255), nullable=False)
++    product_name = Column(String(255), nullable=False)
++    unit_price = Column(Integer, nullable=False)
++    quantity = Column(Integer, nullable=False)
++    line_amount = Column(Integer, nullable=False)
++
++    order = relationship("Order", back_populates="items")
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+new file mode 100644
+index 0000000..f646f9d
+--- /dev/null
++++ b/stockflow/schemas.py
+@@ -0,0 +1,70 @@
++"""Pydantic schemas for StockFlow Mini."""
++
++from datetime import datetime
++from uuid import UUID
++
++from pydantic import BaseModel, Field
++
++
++# --- Product schemas ---
++
++class ProductCreate(BaseModel):
++    sku: str = Field(..., min_length=1)
++    name: str = Field(..., min_length=1)
++    unit_price: int = Field(..., ge=0)
++    stock: int = Field(..., ge=0)
++
++
++class ProductResponse(BaseModel):
++    id: UUID
++    tenant_id: UUID
++    sku: str
++    name: str
++    unit_price: int
++    stock: int
++    created_at: datetime
++    updated_at: datetime
++
++    model_config = {"from_attributes": True}
++
++
++# --- Order schemas ---
++
++class OrderItemCreate(BaseModel):
++    product_id: UUID
++    quantity: int = Field(..., ge=1)
++
++
++class OrderCreate(BaseModel):
++    items: list[OrderItemCreate] = Field(..., min_length=1)
++
++
++class OrderItemResponse(BaseModel):
++    id: UUID
++    order_id: UUID
++    product_id: UUID
++    sku: str
++    product_name: str
++    unit_price: int
++    quantity: int
++    line_amount: int
++
++    model_config = {"from_attributes": True}
++
++
++class OrderResponse(BaseModel):
++    id: UUID
++    tenant_id: UUID
++    status: str
++    total_amount: int
++    created_at: datetime
++    updated_at: datetime
++    items: list[OrderItemResponse] = []
++
++    model_config = {"from_attributes": True}
++
++
++# --- Error schema ---
++
++class ErrorResponse(BaseModel):
++    error: dict

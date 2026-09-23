@@ -1,0 +1,163 @@
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..11014dc 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,5 +1,6 @@
+ import uuid
+ from collections import defaultdict
++from math import floor
+ from typing import Any
+ 
+ from fastapi import Depends, FastAPI, Header, Request
+@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+ from stockflow.models import Order, OrderItem, Product
+-from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
++from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut, order_to_out
+ 
+ app = FastAPI(title="StockFlow Mini")
+ 
+@@ -66,6 +67,17 @@ def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: b
+     return order
+ 
+ 
++def compute_amounts(line_total: int) -> tuple[int, int, int]:
++    """Return (subtotal_amount, tax_amount, total_amount).
++
++    tax_amount = floor(subtotal * 0.10)
++    total_amount = subtotal + tax
++    """
++    subtotal = line_total
++    tax = floor(subtotal * 0.10)
++    return subtotal, tax, subtotal + tax
++
++
+ @app.get("/health")
+ def health(session: Session = Depends(get_session)) -> dict[str, str]:
+     session.execute(text("SELECT 1"))
+@@ -127,15 +139,15 @@ def create_order(
+         for product in products:
+             if product.stock < quantities[product.id]:
+                 raise ApiError(409, "INSUFFICIENT_STOCK", "Insufficient stock")
+-        order = Order(tenant_id=tenant, status="PENDING", total_amount=0)
++        order = Order(tenant_id=tenant, status="PENDING")
+         session.add(order)
+         session.flush()
+-        total = 0
++        line_total = 0
+         for product in products:
+             quantity = quantities[product.id]
+             product.stock -= quantity
+             line_amount = product.unit_price * quantity
+-            total += line_amount
++            line_total += line_amount
+             session.add(
+                 OrderItem(
+                     order_id=order.id,
+@@ -147,7 +159,13 @@ def create_order(
+                     line_amount=line_amount,
+                 )
+             )
+-        order.total_amount = total
++        subtotal, tax, total_incl = compute_amounts(line_total)
++        order.subtotal_amount = subtotal
++        order.tax_amount = tax
++        # During compatibility the physical total_amount column keeps its old
++        # tax-exclusive meaning so the legacy app's read/write stays correct.
++        # The API response surfaces the tax-inclusive total computed below.
++        order.total_amount = subtotal
+         session.commit()
+     except ApiError:
+         session.rollback()
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..949f7f3 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -32,11 +32,17 @@ class Product(Base):
+ 
+ class Order(Base):
+     __tablename__ = "orders"
+-    __table_args__ = (CheckConstraint("total_amount >= 0", name="ck_orders_total"),)
++    __table_args__ = (
++        CheckConstraint("subtotal_amount >= 0", name="ck_orders_subtotal"),
++        CheckConstraint("tax_amount >= 0", name="ck_orders_tax"),
++        CheckConstraint("total_amount >= 0", name="ck_orders_total"),
++    )
+ 
+     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+     status: Mapped[str] = mapped_column(String(20), default="PENDING")
++    subtotal_amount: Mapped[int] = mapped_column(Integer, server_default="0")
++    tax_amount: Mapped[int] = mapped_column(Integer, server_default="0")
+     total_amount: Mapped[int] = mapped_column(Integer)
+     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+     updated_at: Mapped[datetime] = mapped_column(
+@@ -66,4 +72,3 @@ class OrderItem(Base):
+     quantity: Mapped[int] = mapped_column(Integer)
+     line_amount: Mapped[int] = mapped_column(Integer)
+     order: Mapped[Order] = relationship(back_populates="items")
+-
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..d834340 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -1,7 +1,9 @@
+ import uuid
+ from datetime import datetime
+ 
+-from pydantic import BaseModel, ConfigDict, Field
++from pydantic import BaseModel, ConfigDict, Field, computed_field
++
++from stockflow.models import Order
+ 
+ 
+ class ProductCreate(BaseModel):
+@@ -45,8 +47,46 @@ class OrderOut(BaseModel):
+     id: uuid.UUID
+     tenant_id: uuid.UUID
+     status: str
+-    total_amount: int
++    subtotal_amount: int
++    tax_amount: int
+     created_at: datetime
+     updated_at: datetime
+     items: list[OrderItemOut]
+ 
++    @computed_field
++    @property
++    def total_amount(self) -> int:
++        return self.subtotal_amount + self.tax_amount
++
++
++def order_to_out(order: Order) -> OrderOut:
++    """Build an OrderOut from an Order ORM instance.
++
++    During the compatibility window the physical `total_amount` column still
++    stores the tax-exclusive subtotal (preserved for the legacy app). The
++    tax-inclusive total is surfaced by the API via the computed property
++    above; this helper exists so callers can construct the response object
++    deterministically without relying on from_attributes resolution order.
++    """
++    return OrderOut(
++        id=order.id,
++        tenant_id=order.tenant_id,
++        status=order.status,
++        subtotal_amount=order.subtotal_amount,
++        tax_amount=order.tax_amount,
++        created_at=order.created_at,
++        updated_at=order.updated_at,
++        items=[
++            OrderItemOut(
++                id=item.id,
++                order_id=item.order_id,
++                product_id=item.product_id,
++                sku=item.sku,
++                product_name=item.product_name,
++                unit_price=item.unit_price,
++                quantity=item.quantity,
++                line_amount=item.line_amount,
++            )
++            for item in order.items
++        ],
++    )

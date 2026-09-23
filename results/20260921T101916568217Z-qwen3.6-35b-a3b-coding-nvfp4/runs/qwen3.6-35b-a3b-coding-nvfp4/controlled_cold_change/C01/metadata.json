@@ -1,0 +1,39 @@
+{
+  "model": "qwen3.6:35b-a3b-coding-nvfp4",
+  "track": "controlled_cold_change",
+  "task": "C01",
+  "started_at": "2026-09-21T10:42:44.208738+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repeat_penalty": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 8192,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 57344,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "Successfully implemented `GET /orders` endpoint with cursor-based pagination for StockFlow Mini.\n\n**Changes made:**\n\n1. **stockflow/schemas.py**: Added `OrdersListOut` response model with `items` (list of OrderOut) and `next_cursor` (str | None).\n\n2. **stockflow/main.py**: Added the following:\n   - **Cursor utilities**: `_encode_cursor()` and `_decode_cursor()` functions that create opaque, tamper-evident cursors using HMAC-SHA256 with `CURSOR_SECRET`. The cursor includes the filter parameters (`status`, `created_from`, `created_to`) to detect reuse with different filters.\n   - **GET /orders endpoint**: \n     - Required `limit` parameter (1-100)\n     - Optional `status`, `created_from`, `created_to`, `cursor` parameters\n     - Orders filtered by tenant, with optional status and date range filters\n     - Ordered by `created_at DESC, id DESC`\n     - Returns `{\"items\": [...], \"next_cursor\": \"string or null\"}`\n     - Cursor validation ensures reuse with different filters returns 400 `INVALID_CURSOR`\n     - Uses `<` comparison for both `created_at` and `id` to prevent duplicates/gaps when multiple orders share the same `created_at`\n\n**Key design decisions:**\n- Cursor includes HMAC signature for tamper detection\n- Cursor payload contains filter parameters to detect filter changes (returns 400 INVALID_CURSOR)\n- Uses `created_at < cursor_at OR (created_at == cursor_at AND id < cursor_id)` to ensure no duplicates/gaps",
+    "turns": 17,
+    "last_prompt_tokens": 21297,
+    "prompt_tokens": 200427,
+    "completion_tokens": 4953,
+    "duration_seconds": 253.466
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 70,
+  "code_health_score": 100.0
+}

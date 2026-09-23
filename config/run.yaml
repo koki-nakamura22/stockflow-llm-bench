@@ -1,0 +1,43 @@
+benchmark_version: "0.2.2"
+# Cohort "practical settings" (2026-09-21). Sources and quotes: VENDOR_SETTINGS.md
+# Every model runs at its vendor-recommended sampling values with thinking on. Values are passed
+# explicitly on the CLI (scripts/run_cohort.sh) and recorded in results/<group>/run-config.json.
+sampling:
+  qwen3.6:35b-a3b-coding-nvfp4: {temperature: 0.6, top_p: 0.95, top_k: 20, min_p: 0, presence_penalty: 0, repeat_penalty: 1}
+  qwen3.6:35b-a3b:              {temperature: 0.6, top_p: 0.95, top_k: 20, min_p: 0, presence_penalty: 0, repeat_penalty: 1}  # Qwen "precise coding" values, so the two differ only by quantization
+  north-mini-code-1.0:          {temperature: 1.0, top_p: 0.95}
+  gpt-oss:20b:                  {temperature: 1.0, top_p: 1.0}
+# Ollama `think` field: off | on | low | medium | high | default.
+thinking: on
+thinking_overrides:
+  gpt-oss: medium   # cannot be disabled; `low` abandons the task
+seed: null          # not fixed. Reproducibility is reported as the range over repeated runs;
+                    # temperature 0 + seed 42 did not give identical runs on MoE + Metal anyway.
+context_window: 65536   # needs OLLAMA_FLASH_ATTENTION=1 and OLLAMA_KV_CACHE_TYPE=q8_0 on 32GB
+max_turns: 40
+max_total_output_chars: 250000
+# 2400: must cover max_output_tokens at long-context speed (ornith: 24K tokens took >20 min at 18K ctx).
+request_timeout_seconds: 2400
+# Cap on one turn's generation (Ollama num_predict). A reasoning loop otherwise runs until the
+# context is full or the request times out; gpt-oss:20b hit the 600s timeout twice in one run.
+# 24576, not 8192: a thinking model whose turn is cut off restarts the same deliberation next turn
+# (the chat template drops prior thinking), so the cap must hold one full deliberation. With 8192,
+# qwen nvfp4 spent 3 x 8K tokens thinking on C02 and C05 without ever acting. Qwen recommends a
+# 32K output budget; 24K is what a 64K window can spare.
+max_output_tokens: 24576
+task_timeout_seconds: 5400
+execution: serial
+attempts: 1
+# Only the finish tool ends a run. Text-only replies are nudged; this many in a row stops the run
+# with agent status no_tool_call.
+max_no_tool_turns: 3
+# The same tool call with the same result, this many times in a row, stops the run with agent
+# status repeated_call. From the 3rd repeat the tool result carries a notice saying so.
+max_repeated_calls: 8
+# Stop with agent status context_exceeded once the next prompt is estimated above this size,
+# so the endpoint never silently truncates the system prompt / task. Artifacts are still evaluated.
+# Default is context_window - max_output_tokens.
+context_guard_tokens: 40960
+
+# Superseded cohort (0.1.x, 2026-09-21): temperature 0, seed 42, thinking off (gpt-oss medium),
+# 32K context. Against all three vendors' model cards; kept only as harness shakedown data.

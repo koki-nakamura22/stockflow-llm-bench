@@ -1,0 +1,52 @@
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..c871c36 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -147,7 +147,10 @@ def create_order(
+                     line_amount=line_amount,
+                 )
+             )
+-        order.total_amount = total
++        order.subtotal_amount = total
+++        order.tax_amount = (total * 10) // 100
+++        order.total_amount = total
++
+         session.commit()
+     except ApiError:
+         session.rollback()
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..478ccf7 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -37,7 +37,11 @@ class Order(Base):
+     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+     status: Mapped[str] = mapped_column(String(20), default="PENDING")
++    # existing total_amount column represents tax‑exclusive subtotal
+     total_amount: Mapped[int] = mapped_column(Integer)
++    # new columns for expanded API
++    subtotal_amount: Mapped[int] = mapped_column(Integer, default=0)
++    tax_amount: Mapped[int] = mapped_column(Integer, default=0)
+     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+     updated_at: Mapped[datetime] = mapped_column(
+         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+@@ -66,4 +70,3 @@ class OrderItem(Base):
+     quantity: Mapped[int] = mapped_column(Integer)
+     line_amount: Mapped[int] = mapped_column(Integer)
+     order: Mapped[Order] = relationship(back_populates="items")
+-
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..095aef8 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -45,8 +45,9 @@ class OrderOut(BaseModel):
+     id: uuid.UUID
+     tenant_id: uuid.UUID
+     status: str
++    subtotal_amount: int
++    tax_amount: int
+     total_amount: int
+     created_at: datetime
+     updated_at: datetime
+     items: list[OrderItemOut]
+-

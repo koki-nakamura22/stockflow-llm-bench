@@ -1,0 +1,7 @@
+model,track,task,evaluator_status,capability_score,code_health_score,agent_status,turns,prompt_tokens,completion_tokens,duration_seconds,public_tests_unchanged,run_dir
+qwen3.6:35b-a3b-coding-nvfp4,zero_to_one,A00,error,0,70.0,max_turns,40,630415,28449,1124.981,True,./results/20260921T101916568217Z-qwen3.6-35b-a3b-coding-nvfp4/runs/qwen3.6-35b-a3b-coding-nvfp4/zero_to_one/A00
+qwen3.6:35b-a3b-coding-nvfp4,controlled_cold_change,C01,completed,70,100.0,completed,17,200427,4953,253.466,True,./results/20260921T101916568217Z-qwen3.6-35b-a3b-coding-nvfp4/runs/qwen3.6-35b-a3b-coding-nvfp4/controlled_cold_change/C01
+qwen3.6:35b-a3b-coding-nvfp4,controlled_cold_change,C02,completed,9,85.0,no_tool_call,12,91572,29865,1176.562,True,./results/20260921T101916568217Z-qwen3.6-35b-a3b-coding-nvfp4/runs/qwen3.6-35b-a3b-coding-nvfp4/controlled_cold_change/C02
+qwen3.6:35b-a3b-coding-nvfp4,controlled_cold_change,C03,completed,96,100.0,completed,12,94438,3980,205.29,True,./results/20260921T101916568217Z-qwen3.6-35b-a3b-coding-nvfp4/runs/qwen3.6-35b-a3b-coding-nvfp4/controlled_cold_change/C03
+qwen3.6:35b-a3b-coding-nvfp4,controlled_cold_change,C04,completed,58,100.0,completed,19,266790,7125,361.3,True,./results/20260921T101916568217Z-qwen3.6-35b-a3b-coding-nvfp4/runs/qwen3.6-35b-a3b-coding-nvfp4/controlled_cold_change/C04
+qwen3.6:35b-a3b-coding-nvfp4,controlled_cold_change,C05,error,0,100.0,no_tool_call,7,38013,25176,984.132,True,./results/20260921T101916568217Z-qwen3.6-35b-a3b-coding-nvfp4/runs/qwen3.6-35b-a3b-coding-nvfp4/controlled_cold_change/C05

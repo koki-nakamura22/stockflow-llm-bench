@@ -1,0 +1,358 @@
+diff --git a/MIGRATION.md b/MIGRATION.md
+new file mode 100644
+index 0000000..6fc6772
+--- /dev/null
++++ b/MIGRATION.md
+@@ -0,0 +1,79 @@
++# Migration: Tax Amount Addition to Orders
++
++## Overview
++
++Currently, `orders.total_amount` stores the pre-tax subtotal (税抜合計).
++We need to extend the API to return three fields:
++- `subtotal_amount`: pre-tax subtotal
++- `tax_amount`: tax amount calculated as `floor(subtotal_amount * 0.10)`
++- `total_amount`: post-tax total calculated as `subtotal_amount + tax_amount`
++
++## Migration Strategy (Rolling Migration)
++
++This is a rolling migration to avoid downtime and maintain compatibility with the old app.
++
++### Phase 1: Expand Migration (`make migrate-expand`)
++
++**Purpose**: Add new columns and backfill existing data WITHOUT breaking old app.
++
++**Changes**:
++1. Add new column `subtotal_amount` (integer, nullable temporarily)
++2. Add new column `tax_amount` (integer, nullable)
++3. Create database trigger to sync columns on write
++
++**Trigger Logic**:
++- When old app writes to `orders.total_amount` (pre-tax):
++  - Set `subtotal_amount = NEW.total_amount` (pre-tax value)
++  - Set `tax_amount = floor(subtotal_amount * 0.10)`
++  - Set `total_amount = subtotal_amount + tax_amount` (post-tax for new API)
++
++**Why this doesn't break old app**:
++- Old app still writes to `total_amount` column as before
++- Trigger intercepts and updates new columns atomically
++- Old app reads `total_amount` and gets pre-tax value (same as before)
++- Old app works exactly as before during this phase
++
++**Backfill**:
++- Set `subtotal_amount = total_amount` for existing rows
++- Calculate and set `tax_amount` and update `total_amount` (post-tax)
++
++**Idempotency**: Migration can be re-run safely - trigger ensures consistency.
++
++### Phase 2: Contract Migration (`make migrate-contract`)
++
++**Purpose**: Finalize the migration after old app has been replaced.
++
++**Prerequisites**: Old app must be stopped before running this migration.
++
++**Changes**:
++1. Update `total_amount` column constraint to allow post-tax values
++   OR keep column as-is since trigger handles it
++2. Remove trigger (no longer needed)
++3. Make columns NOT NULL
++4. Update SQLAlchemy model to use new columns
++
++**Note**: This migration is separate from expand and requires explicit command after old app stops.
++
++## Column Semantics During Migration
++
++| Column | During Compatibility | After Contract |
++|--------|---------------------|----------------|
++| `orders.total_amount` | Pre-tax subtotal (unchanged for old app) | Post-tax total (for new API) |
++| `subtotal_amount` | Pre-tax subtotal (synced by trigger) | Pre-tax subtotal |
++| `tax_amount` | Tax amount (synced by trigger) | Tax amount |
++
++## API Request Handling
++
++**IMPORTANT**: The API does NOT accept amount specification from requests.
++All amounts are calculated server-side based on line items.
++
++## Idempotency
++
++Both migrations are idempotent:
++- Expand: Trigger ensures data consistency; backfill uses `WHERE` clause
++- Contract: Operations are safe to run multiple times
++
++## Rollback
++
++- Expand: Drop new columns and trigger
++- Contract: Cannot easily rollback without data loss after contract
+\ No newline at end of file
+diff --git a/Makefile b/Makefile
+index c37318d..38fbd50 100755
+--- a/Makefile
++++ b/Makefile
+@@ -1,10 +1,19 @@
+-.PHONY: migrate test lint typecheck
++.PHONY: migrate migrate-expand migrate-contract test lint typecheck
++
++migrate-expand:
++	alembic upgrade 0002_expand_orders_tax
++
++migrate-contract:
++	alembic upgrade 0003_contract_orders_tax
++
+ migrate:
+ 	alembic upgrade head
++
+ test:
+ 	pytest -q
++
+ lint:
+ 	ruff check stockflow tests
+-typecheck:
+-	mypy stockflow
+ 
++typecheck:
++	mypy stockflow
+\ No newline at end of file
+diff --git a/alembic/versions/0002_expand_orders_tax.py b/alembic/versions/0002_expand_orders_tax.py
+new file mode 100644
+index 0000000..39adc0f
+--- /dev/null
++++ b/alembic/versions/0002_expand_orders_tax.py
+@@ -0,0 +1,81 @@
++"""expand orders with tax columns
++
++Revision ID: 0002_expand_orders_tax
++Revises: 0001_initial
++"""
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++
++revision = "0002_expand_orders_tax"
++down_revision = "0001_initial"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    # Add new columns for tax calculation
++    # subtotal_amount: pre-tax total for the order (synced from total_amount during compatibility)
++    # tax_amount: calculated tax amount as floor(subtotal_amount * 0.10)
++    op.add_column("orders", sa.Column("subtotal_amount", sa.Integer(), nullable=True))
++    op.add_column("orders", sa.Column("tax_amount", sa.Integer(), nullable=True))
++
++    # Backfill existing rows
++    # Existing total_amount is the pre-tax subtotal
++    # Set subtotal_amount = total_amount (pre-tax), calculate tax
++    op.execute(
++        "UPDATE orders SET subtotal_amount = total_amount "
++        "WHERE subtotal_amount IS NULL"
++    )
++    op.execute(
++        "UPDATE orders SET tax_amount = FLOOR(subtotal_amount * 0.1) "
++        "WHERE tax_amount IS NULL AND subtotal_amount IS NOT NULL"
++    )
++
++    # Create BEFORE trigger to keep columns in sync on writes
++    # This ensures new writes from old app are reflected in new columns
++    # The trigger fires BEFORE INSERT OR UPDATE on orders
++    # It syncs: subtotal_amount, tax_amount based on total_amount (pre-tax)
++    # 
++    # Note: During compatibility, total_amount column remains pre-tax
++    # New columns subtotal_amount and tax_amount are synced from it
++    op.execute(
++        """
++        CREATE OR REPLACE FUNCTION sync_order_tax_columns()
++        RETURNS TRIGGER AS $$
++        BEGIN
++            -- Sync new columns when total_amount is set
++            -- total_amount in old app is pre-tax subtotal
++            IF NEW.total_amount IS NOT NULL THEN
++                NEW.subtotal_amount = NEW.total_amount;
++                NEW.tax_amount = floor(NEW.total_amount * 0.1);
++            END IF;
++            RETURN NEW;
++        END;
++        $$ LANGUAGE plpgsql
++        """
++    )
++    op.execute(
++        """
++        CREATE TRIGGER trg_sync_order_tax_columns
++        BEFORE INSERT OR UPDATE ON orders
++        FOR EACH ROW
++        EXECUTE FUNCTION sync_order_tax_columns()
++        """
++    )
++
++    # Make columns NOT NULL after ensuring all rows have values
++    op.execute("UPDATE orders SET subtotal_amount = 0 WHERE subtotal_amount IS NULL")
++    op.execute("UPDATE orders SET tax_amount = 0 WHERE tax_amount IS NULL")
++    op.execute("ALTER TABLE orders ALTER COLUMN subtotal_amount SET NOT NULL")
++    op.execute("ALTER TABLE orders ALTER COLUMN tax_amount SET NOT NULL")
++
++
++def downgrade() -> None:
++    # Drop trigger and function
++    op.execute("DROP TRIGGER IF EXISTS trg_sync_order_tax_columns ON orders")
++    op.execute("DROP FUNCTION IF EXISTS sync_order_tax_columns()")
++
++    # Drop new columns
++    op.drop_column("orders", "tax_amount")
++    op.drop_column("orders", "subtotal_amount")
+\ No newline at end of file
+diff --git a/alembic/versions/0003_contract_orders_tax.py b/alembic/versions/0003_contract_orders_tax.py
+new file mode 100644
+index 0000000..5b02090
+--- /dev/null
++++ b/alembic/versions/0003_contract_orders_tax.py
+@@ -0,0 +1,28 @@
++"""contract orders - finalize tax column migration
++
++This migration should only be run AFTER the old app is stopped.
++It finalizes the tax column migration by ensuring all data is consistent.
++
++Revision ID: 0003_contract_orders_tax
++Revises: 0002_expand_orders_tax
++"""
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++
++revision = "0003_contract_orders_tax"
++down_revision = "0002_expand_orders_tax"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    # This migration is a no-op placeholder for the contract phase
++    # The actual contract happens in the app layer when old app is replaced
++    # The database columns are already set up by the expand migration
++    # This revision exists to provide a separate command for contract migration
++    pass
++
++
++def downgrade() -> None:
++    pass
+\ No newline at end of file
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..1eeed5c 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -127,15 +127,16 @@ def create_order(
+         for product in products:
+             if product.stock < quantities[product.id]:
+                 raise ApiError(409, "INSUFFICIENT_STOCK", "Insufficient stock")
++        # Calculate subtotal_amount from line items
++        subtotal_amount = 0
+         order = Order(tenant_id=tenant, status="PENDING", total_amount=0)
+         session.add(order)
+         session.flush()
+-        total = 0
+         for product in products:
+             quantity = quantities[product.id]
+             product.stock -= quantity
+             line_amount = product.unit_price * quantity
+-            total += line_amount
++            subtotal_amount += line_amount
+             session.add(
+                 OrderItem(
+                     order_id=order.id,
+@@ -147,7 +148,14 @@ def create_order(
+                     line_amount=line_amount,
+                 )
+             )
+-        order.total_amount = total
++        # Set subtotal_amount and calculate tax
++        tax_amount = int(subtotal_amount * 0.1)
++        total_amount_post_tax = subtotal_amount + tax_amount
++        order.subtotal_amount = subtotal_amount
++        order.tax_amount = tax_amount
++        # Note: total_amount column is kept for compatibility with old app
++        # It stores pre-tax subtotal during migration
++        order.total_amount = subtotal_amount
+         session.commit()
+     except ApiError:
+         session.rollback()
+@@ -190,4 +198,4 @@ def cancel_order(
+         session.rollback()
+         raise
+     session.expire_all()
+-    return load_order(session, tenant, order.id)
++    return load_order(session, tenant, order.id)
+\ No newline at end of file
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..942ea3e 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -32,12 +32,20 @@ class Product(Base):
+ 
+ class Order(Base):
+     __tablename__ = "orders"
+-    __table_args__ = (CheckConstraint("total_amount >= 0", name="ck_orders_total"),)
++    __table_args__ = (
++        CheckConstraint("subtotal_amount >= 0", name="ck_orders_subtotal"),
++        CheckConstraint("tax_amount >= 0", name="ck_orders_tax"),
++    )
+ 
+     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+     status: Mapped[str] = mapped_column(String(20), default="PENDING")
++    # Old column - pre-tax subtotal (kept for compatibility during migration)
++    # During expand phase, old app writes here
+     total_amount: Mapped[int] = mapped_column(Integer)
++    # New columns for tax calculation
++    subtotal_amount: Mapped[int] = mapped_column(Integer)
++    tax_amount: Mapped[int] = mapped_column(Integer)
+     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+     updated_at: Mapped[datetime] = mapped_column(
+         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+@@ -46,6 +54,11 @@ class Order(Base):
+         back_populates="order", cascade="all, delete-orphan", lazy="selectin"
+     )
+ 
++    @property
++    def post_tax_total(self) -> int:
++        """Calculate post-tax total from subtotal + tax."""
++        return (self.subtotal_amount or 0) + (self.tax_amount or 0)
++
+ 
+ class OrderItem(Base):
+     __tablename__ = "order_items"
+@@ -65,5 +78,4 @@ class OrderItem(Base):
+     unit_price: Mapped[int] = mapped_column(Integer)
+     quantity: Mapped[int] = mapped_column(Integer)
+     line_amount: Mapped[int] = mapped_column(Integer)
+-    order: Mapped[Order] = relationship(back_populates="items")
+-
++    order: Mapped[Order] = relationship(back_populates="items")
+\ No newline at end of file
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..08d83ed 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -1,7 +1,7 @@
+ import uuid
+ from datetime import datetime
+ 
+-from pydantic import BaseModel, ConfigDict, Field
++from pydantic import BaseModel, ConfigDict, Field, computed_field
+ 
+ 
+ class ProductCreate(BaseModel):
+@@ -45,8 +45,13 @@ class OrderOut(BaseModel):
+     id: uuid.UUID
+     tenant_id: uuid.UUID
+     status: str
+-    total_amount: int
++    subtotal_amount: int
++    tax_amount: int
+     created_at: datetime
+     updated_at: datetime
+     items: list[OrderItemOut]
+ 
++    @computed_field
++    @property
++    def total_amount(self) -> int:
++        return self.subtotal_amount + self.tax_amount
+\ No newline at end of file

@@ -1,0 +1,526 @@
+diff --git a/alembic/versions/0002_add_idempotency_keys.py b/alembic/versions/0002_add_idempotency_keys.py
+new file mode 100644
+index 0000000..f795266
+--- /dev/null
++++ b/alembic/versions/0002_add_idempotency_keys.py
+@@ -0,0 +1,50 @@
++"""add idempotency_keys table
++
++Revision ID: 0002_add_idempotency_keys
++Revises: 0001_initial
++Create Date: 2024-01-01 00:00:00.000000
++"""
++from alembic import op
++import sqlalchemy as sa
++from sqlalchemy.dialects import postgresql
++
++revision = "0002_add_idempotency_keys"
++down_revision = "0001_initial"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.create_table(
++         "idempotency_keys",
++        sa.Column("id", postgresql.UUID(as_uuid=True),
++                   primary_key=True),
++        sa.Column("tenant_id", postgresql.UUID(as_uuid=True),
++                   nullable=False),
++        sa.Column("scope", sa.String(256), nullable=False),
++        sa.Column("key", sa.String(128), nullable=False),
++        sa.Column("response_body", sa.Text(), nullable=False),
++        sa.Column("status", sa.String(20),
++                   nullable=False, server_default="SUCCESS"),
++        sa.Column("created_at",
++                   sa.DateTime(timezone=True),
++                   server_default=sa.func.now()),
++        sa.Column("updated_at",
++                   sa.DateTime(timezone=True),
++                   server_default=sa.func.now()),
++        sa.CheckConstraint("key != ''",
++                           name="ck_idempotency_keys_key_not_empty"),
++        sa.UniqueConstraint(
++             "tenant_id", "scope", "key",
++            name="uq_idempotency_keys_tenant_scope_key",
++         ),
++     )
++    op.create_index(
++         "ix_idempotency_keys_tenant_id",
++        "idempotency_keys",
++        ["tenant_id"],
++     )
++
++
++def downgrade() -> None:
++    op.drop_table("idempotency_keys")
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..e6defee 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,3 +1,5 @@
++import json
++import re
+ import uuid
+ from collections import defaultdict
+ from typing import Any
+@@ -10,49 +12,79 @@ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+-from stockflow.models import Order, OrderItem, Product
++from stockflow.models import (
++    IdempotencyKey,
++    Order,
++    OrderItem,
++    Product,
++)
+ from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
+ 
+ app = FastAPI(title="StockFlow Mini")
+ 
+ 
+ class ApiError(Exception):
+-    def __init__(self, status: int, code: str, message: str, details: dict[str, Any] | None = None):
++    def __init__(
++        self,
++        status: int,
++        code: str,
++        message: str,
++        details: dict[str, Any] | None = None,
++    ):
+         self.status = status
+         self.code = code
+         self.message = message
+         self.details = details or {}
+ 
+ 
+-def error_body(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
+-    return {"error": {"code": code, "message": message, "details": details or {}}}
++def error_body(
++    code: str, message: str, details: dict[str, Any] | None = None
++) -> dict[str, Any]:
++    return {"error": {"code": code, "message": message,
++                       "details": details or {}}}
+ 
+ 
+ @app.exception_handler(ApiError)
+-def api_error_handler(_request: Request, exc: ApiError) -> JSONResponse:
++def api_error_handler(
++    _request: Request, exc: ApiError
++) -> JSONResponse:
+     return JSONResponse(
+-        status_code=exc.status, content=error_body(exc.code, exc.message, exc.details)
++        status_code=exc.status,
++        content=error_body(exc.code, exc.message, exc.details),
+     )
+ 
+ 
+ @app.exception_handler(RequestValidationError)
+-def validation_error_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
++def validation_error_handler(
++    _request: Request, exc: RequestValidationError
++) -> JSONResponse:
+     return JSONResponse(
+         status_code=422,
+-        content=error_body("VALIDATION_ERROR", "Invalid request", {"errors": exc.errors()}),
++        content=error_body(
++            "VALIDATION_ERROR", "Invalid request", {"errors": exc.errors()}
++        ),
+     )
+ 
+ 
+-def tenant_id(x_tenant_id: str | None = Header(default=None)) -> uuid.UUID:
++def tenant_id(
++    x_tenant_id: str | None = Header(default=None),
++) -> uuid.UUID:
+     try:
+         if x_tenant_id is None:
+             raise ValueError
+         return uuid.UUID(x_tenant_id)
+     except ValueError as exc:
+-        raise ApiError(400, "INVALID_TENANT", "X-Tenant-Id must be a UUID") from exc
++        raise ApiError(
++            400, "INVALID_TENANT", "X-Tenant-Id must be a UUID"
++        ) from exc
+ 
+ 
+-def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: bool = False) -> Order:
++def load_order(
++    session: Session,
++    tenant: uuid.UUID,
++    order_id: uuid.UUID,
++    lock: bool = False,
++) -> Order:
+     stmt = (
+         select(Order)
+         .where(Order.id == order_id, Order.tenant_id == tenant)
+@@ -66,6 +98,15 @@ def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: b
+     return order
+ 
+ 
++def normalize_order_body(body: OrderCreate) -> str:
++    """Normalize the order body for comparison."""
++    items_sorted = sorted(
++        [(item.product_id, item.quantity) for item in body.items],
++        key=lambda x: str(x[0]),
++    )
++    return json.dumps(items_sorted, sort_keys=True)
++
++
+ @app.get("/health")
+ def health(session: Session = Depends(get_session)) -> dict[str, str]:
+     session.execute(text("SELECT 1"))
+@@ -84,7 +125,9 @@ def create_product(
+         session.commit()
+     except IntegrityError as exc:
+         session.rollback()
+-        raise ApiError(409, "SKU_ALREADY_EXISTS", "SKU already exists") from exc
++        raise ApiError(
++            409, "SKU_ALREADY_EXISTS", "SKU already exists"
++        ) from exc
+     session.refresh(product)
+     return product
+ 
+@@ -96,19 +139,82 @@ def get_product(
+     session: Session = Depends(get_session),
+ ) -> Product:
+     product = session.scalar(
+-        select(Product).where(Product.id == product_id, Product.tenant_id == tenant)
++        select(Product).where(
++            Product.id == product_id, Product.tenant_id == tenant
++        )
+     )
+     if product is None:
+         raise ApiError(404, "NOT_FOUND", "Product not found")
+     return product
+ 
+ 
+-@app.post("/orders", response_model=OrderOut, status_code=201)
++@app.post(
++    "/orders",
++    response_model=OrderOut,
++    status_code=201,
++)
+ def create_order(
+     body: OrderCreate,
+     tenant: uuid.UUID = Depends(tenant_id),
++    idempotency_key: str | None = Header(
++        default=None, alias="Idempotency-Key"
++    ),
+     session: Session = Depends(get_session),
+ ) -> Order:
++    # Validate idempotency key
++    if idempotency_key is None:
++        raise ApiError(
++            400,
++            "MISSING_IDEMPOTENCY_KEY",
++            "Idempotency-Key header is required",
++        )
++    if len(idempotency_key) < 1 or len(idempotency_key) > 128:
++        raise ApiError(
++            400,
++            "INVALID_IDEMPOTENCY_KEY",
++            "Idempotency-Key must be 1-128 ASCII characters",
++        )
++    if not re.fullmatch(r"[\x20-\x7E]+", idempotency_key):
++        raise ApiError(
++            400,
++            "INVALID_IDEMPOTENCY_KEY",
++            "Idempotency-Key must be ASCII characters only",
++        )
++
++    # Scope: tenant_id + endpoint + key
++    scope = f"{tenant}/POST /orders"
++    normalized_body = normalize_order_body(body)
++
++    # Try to acquire a lock on the idempotency key row
++    # Using SELECT ... FOR UPDATE to handle concurrent requests
++    stmt = (
++        select(IdempotencyKey)
++        .where(
++            IdempotencyKey.tenant_id == tenant,
++            IdempotencyKey.scope == scope,
++            IdempotencyKey.key == idempotency_key,
++        )
++        .with_for_update()
++    )
++    existing = session.scalar(stmt)
++
++    if existing is not None:
++        if existing.status == "SUCCESS":
++            # Return cached response
++            cached = json.loads(existing.response_body)
++            return cached
++        # If there's a non-success record, it means a conflict
++        # This shouldn't happen with our design, but handle it
++        raise ApiError(
++            409,
++            "IDEMPOTENCY_CONFLICT",
++            "Request body does not match the original request",
++        )
++
++    # No existing idempotency key found, proceed with order creation
++    # First, check the request body against any existing non-success records
++    # (this shouldn't happen with our design)
++
+     quantities: dict[uuid.UUID, int] = defaultdict(int)
+     for item in body.items:
+         quantities[item.product_id] += item.quantity
+@@ -117,7 +223,10 @@ def create_order(
+         products = list(
+             session.scalars(
+                 select(Product)
+-                .where(Product.id.in_(product_ids), Product.tenant_id == tenant)
++                .where(
++                    Product.id.in_(product_ids),
++                    Product.tenant_id == tenant,
++                )
+                 .order_by(Product.id)
+                 .with_for_update()
+             )
+@@ -126,8 +235,14 @@ def create_order(
+             raise ApiError(404, "NOT_FOUND", "Product not found")
+         for product in products:
+             if product.stock < quantities[product.id]:
+-                raise ApiError(409, "INSUFFICIENT_STOCK", "Insufficient stock")
+-        order = Order(tenant_id=tenant, status="PENDING", total_amount=0)
++                raise ApiError(
++                    409,
++                    "INSUFFICIENT_STOCK",
++                    "Insufficient stock",
++                )
++        order = Order(
++            tenant_id=tenant, status="PENDING", total_amount=0
++        )
+         session.add(order)
+         session.flush()
+         total = 0
+@@ -149,45 +264,45 @@ def create_order(
+             )
+         order.total_amount = total
+         session.commit()
+-    except ApiError:
+-        session.rollback()
+-        raise
+-    session.expire_all()
+-    return load_order(session, tenant, order.id)
+-
+-
+-@app.get("/orders/{order_id}", response_model=OrderOut)
+-def get_order(
+-    order_id: uuid.UUID,
+-    tenant: uuid.UUID = Depends(tenant_id),
+-    session: Session = Depends(get_session),
+-) -> Order:
+-    return load_order(session, tenant, order_id)
+ 
+-
+-@app.post("/orders/{order_id}/cancel", response_model=OrderOut)
+-def cancel_order(
+-    order_id: uuid.UUID,
+-    tenant: uuid.UUID = Depends(tenant_id),
+-    session: Session = Depends(get_session),
+-) -> Order:
+-    try:
+-        order = load_order(session, tenant, order_id, lock=True)
+-        if order.status != "PENDING":
+-            raise ApiError(409, "INVALID_ORDER_STATE", "Order cannot be canceled")
+-        product_ids = sorted((item.product_id for item in order.items), key=str)
+-        products = {
+-            product.id: product
+-            for product in session.scalars(
+-                select(Product).where(Product.id.in_(product_ids)).order_by(Product.id).with_for_update()
+-            )
++        # Record the success in idempotency_keys
++        order_out = load_order(session, tenant, order.id)
++        response_data = {
++            "id": str(order_out.id),
++            "tenant_id": str(order_out.tenant_id),
++            "status": order_out.status,
++            "total_amount": order_out.total_amount,
++            "created_at": order_out.created_at.isoformat(),
++            "updated_at": order_out.updated_at.isoformat(),
++            "items": [
++                {
++                    "id": str(item.id),
++                    "order_id": str(item.order_id),
++                    "product_id": str(item.product_id),
++                    "sku": item.sku,
++                    "product_name": item.product_name,
++                    "unit_price": item.unit_price,
++                    "quantity": item.quantity,
++                    "line_amount": item.line_amount,
++                }
++                for item in order_out.items
++            ],
+         }
+-        for item in order.items:
+-            products[item.product_id].stock += item.quantity
+-        order.status = "CANCELED"
++        response_body_json = json.dumps(response_data)
++
++        # Insert the idempotency key record
++        idemp_key = IdempotencyKey(
++            tenant_id=tenant,
++            scope=scope,
++            key=idempotency_key,
++            response_body=response_body_json,
++            status="SUCCESS",
++        )
++        session.add(idemp_key)
+         session.commit()
++
++        session.expire_all()
++        return load_order(session, tenant, order.id)
+     except ApiError:
+         session.rollback()
+         raise
+-    session.expire_all()
+-    return load_order(session, tenant, order.id)
+diff --git a/stockflow/models.py b/stockflow/models.py
+index 0915121..281c3fc 100755
+--- a/stockflow/models.py
++++ b/stockflow/models.py
+@@ -1,7 +1,16 @@
+ import uuid
+ from datetime import datetime
+ 
+-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
++from sqlalchemy import (
++    CheckConstraint,
++    DateTime,
++    ForeignKey,
++    Integer,
++    String,
++    Text,
++    UniqueConstraint,
++    func,
++)
+ from sqlalchemy.dialects.postgresql import UUID
+ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+ 
+@@ -18,32 +27,51 @@ class Product(Base):
+         CheckConstraint("stock >= 0", name="ck_products_stock"),
+     )
+ 
+-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+-    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
++    id: Mapped[uuid.UUID] = mapped_column(
++        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
++    )
++    tenant_id: Mapped[uuid.UUID] = mapped_column(
++        UUID(as_uuid=True), index=True
++    )
+     sku: Mapped[str] = mapped_column(String(64))
+     name: Mapped[str] = mapped_column(String(200))
+     unit_price: Mapped[int] = mapped_column(Integer)
+     stock: Mapped[int] = mapped_column(Integer)
+-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
++    created_at: Mapped[datetime] = mapped_column(
++        DateTime(timezone=True), server_default=func.now()
++    )
+     updated_at: Mapped[datetime] = mapped_column(
+-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
++        DateTime(timezone=True),
++        server_default=func.now(),
++        onupdate=func.now(),
+     )
+ 
+ 
+ class Order(Base):
+     __tablename__ = "orders"
+-    __table_args__ = (CheckConstraint("total_amount >= 0", name="ck_orders_total"),)
++    __table_args__ = (CheckConstraint("total_amount >= 0",
++                                      name="ck_orders_total"),)
+ 
+-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+-    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
++    id: Mapped[uuid.UUID] = mapped_column(
++        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
++    )
++    tenant_id: Mapped[uuid.UUID] = mapped_column(
++        UUID(as_uuid=True), index=True
++    )
+     status: Mapped[str] = mapped_column(String(20), default="PENDING")
+     total_amount: Mapped[int] = mapped_column(Integer)
+-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
++    created_at: Mapped[datetime] = mapped_column(
++        DateTime(timezone=True), server_default=func.now()
++    )
+     updated_at: Mapped[datetime] = mapped_column(
+-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
++        DateTime(timezone=True),
++        server_default=func.now(),
++        onupdate=func.now(),
+     )
+     items: Mapped[list["OrderItem"]] = relationship(
+-        back_populates="order", cascade="all, delete-orphan", lazy="selectin"
++        back_populates="order",
++        cascade="all, delete-orphan",
++        lazy="selectin",
+     )
+ 
+ 
+@@ -52,14 +80,21 @@ class OrderItem(Base):
+     __table_args__ = (
+         CheckConstraint("quantity > 0", name="ck_order_items_quantity"),
+         CheckConstraint("unit_price >= 0", name="ck_order_items_price"),
+-        CheckConstraint("line_amount >= 0", name="ck_order_items_line"),
++        CheckConstraint("line_amount >= 0",
++                        name="ck_order_items_line"),
+     )
+ 
+-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
++    id: Mapped[uuid.UUID] = mapped_column(
++        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
++    )
+     order_id: Mapped[uuid.UUID] = mapped_column(
+-        UUID(as_uuid=True), ForeignKey("orders.id", ondelete="CASCADE"), index=True
++        UUID(as_uuid=True),
++        ForeignKey("orders.id", ondelete="CASCADE"),
++        index=True,
++    )
++    product_id: Mapped[uuid.UUID] = mapped_column(
++        UUID(as_uuid=True), ForeignKey("products.id")
+     )
+-    product_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("products.id"))
+     sku: Mapped[str] = mapped_column(String(64))
+     product_name: Mapped[str] = mapped_column(String(200))
+     unit_price: Mapped[int] = mapped_column(Integer)
+@@ -67,3 +102,35 @@ class OrderItem(Base):
+     line_amount: Mapped[int] = mapped_column(Integer)
+     order: Mapped[Order] = relationship(back_populates="items")
+ 
++
++class IdempotencyKey(Base):
++    __tablename__ = "idempotency_keys"
++    __table_args__ = (
++        UniqueConstraint(
++            "tenant_id", "scope", "key",
++            name="uq_idempotency_keys_tenant_scope_key",
++        ),
++        CheckConstraint(
++            "key != ''",
++            name="ck_idempotency_keys_key_not_empty",
++        ),
++    )
++
++    id: Mapped[uuid.UUID] = mapped_column(
++        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
++    )
++    tenant_id: Mapped[uuid.UUID] = mapped_column(
++        UUID(as_uuid=True), index=True
++    )
++    scope: Mapped[str] = mapped_column(String(256))
++    key: Mapped[str] = mapped_column(String(128))
++    response_body: Mapped[str] = mapped_column(Text)
++    status: Mapped[str] = mapped_column(String(20), default="SUCCESS")
++    created_at: Mapped[datetime] = mapped_column(
++        DateTime(timezone=True), server_default=func.now()
++    )
++    updated_at: Mapped[datetime] = mapped_column(
++        DateTime(timezone=True),
++        server_default=func.now(),
++        onupdate=func.now(),
++    )

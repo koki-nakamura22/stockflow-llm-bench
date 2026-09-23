@@ -1,0 +1,20 @@
+{
+  "model": "qwen3.6:35b-a3b",
+  "adapter": "ollama",
+  "think": "on",
+  "sampling": {
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 0.0,
+    "repeat_penalty": 1.0
+  },
+  "context_window": 65536,
+  "max_output_tokens": 24576,
+  "request_timeout_seconds": 1200,
+  "context_guard_tokens": 40960,
+  "max_no_tool_turns": 3,
+  "max_repeated_calls": 8,
+  "max_turns": 40
+}

@@ -1,0 +1,28 @@
+{
+  "model": "gpt-oss:20b",
+  "track": "controlled_cold_change",
+  "task": "C02",
+  "started_at": "2026-09-21T04:45:00.343796+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "medium",
+    "context_window": 32768,
+    "context_guard_tokens": 24576,
+    "max_no_tool_turns": 3,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "context_exceeded",
+    "error": null,
+    "summary": "",
+    "turns": 27,
+    "last_prompt_tokens": 21326,
+    "prompt_tokens": 284810,
+    "completion_tokens": 10602,
+    "duration_seconds": 618.657
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 0,
+  "code_health_score": 90.0
+}

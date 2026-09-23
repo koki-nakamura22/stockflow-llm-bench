@@ -1,0 +1,39 @@
+{
+  "model": "qwen3.6:35b-a3b",
+  "track": "zero_to_one",
+  "task": "A00",
+  "started_at": "2026-09-21T12:07:57.064540+00:00",
+  "run_config": {
+    "adapter": "ollama",
+    "think": "on",
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repeat_penalty": 1.0
+    },
+    "context_window": 65536,
+    "max_output_tokens": 24576,
+    "request_timeout_seconds": 1200,
+    "context_guard_tokens": 40960,
+    "max_no_tool_turns": 3,
+    "max_repeated_calls": 8,
+    "max_turns": 40
+  },
+  "agent": {
+    "status": "completed",
+    "error": null,
+    "summary": "Successfully implemented StockFlow Mini with the following components:\n\n**Files Created:**\n- `stockflow/database.py` - SQLAlchemy engine, session, and Base model\n- `stockflow/models.py` - Product, Order, OrderItem SQLAlchemy models with UUID primary keys and tenant isolation\n- `stockflow/schemas.py` - Pydantic schemas for request/response validation\n- `stockflow/routers.py` - All API endpoints (products CRUD, orders CRUD, order cancellation)\n- `stockflow/main.py` - FastAPI app with lifespan startup, health endpoint, and validation error handler\n- `alembic/env.py` - Alembic environment configuration\n- `alembic/script.py.mako` - Alembic migration template\n- `alembic/versions/001_create_initial_schema.py` - Initial migration creating products, orders, order_items tables\n\n**API Endpoints Implemented:**\n1. `POST /products` - Create product (201), SKU unique per tenant (409)\n2. `GET /products/{id}` - Get product (tenant-isolated, 404 for others)\n3. `POST /orders` - Create order with atomic stock deduction (201), aggregates same product quantities, snapshots price/name/SKU\n4. `GET /orders/{id}` - Get order with items (tenant-isolated)\n5. `POST /orders/{id}/cancel` - Cancel PENDING order with stock restoration (409 on re-cancel)\n6. `GET /health` - Health check with DB connectivity test\n\n**Error Handling:**\n- INVALID_TENANT (400), VALIDATION_ERROR (422), NOT_FOUND (404), SKU_ALREADY_EXISTS (409), INSUFFICIENT_STOCK (409), INVALID_ORDER_STATE (409)\n\n**Checks Run:**\n- syntax: pass\n- compose-config: pass\n- public-tests: Connection refused (expected - app not running in this check environment; tests require Docker compose with app+db services)",
+    "turns": 36,
+    "last_prompt_tokens": 35921,
+    "prompt_tokens": 498923,
+    "completion_tokens": 23006,
+    "duration_seconds": 1066.214
+  },
+  "public_tests_unchanged": true,
+  "evaluator_status": "completed",
+  "capability_score": 0,
+  "code_health_score": 100.0
+}

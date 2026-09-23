@@ -1,0 +1,16 @@
+{
+  "model": "nemotron-3.5-lightning:30b-a3b-q4_K_M",
+  "adapter": "ollama",
+  "think": "on",
+  "sampling": {
+    "temperature": 1.0,
+    "top_p": 0.95
+  },
+  "context_window": 49152,
+  "max_output_tokens": 16384,
+  "request_timeout_seconds": 1200,
+  "context_guard_tokens": 32768,
+  "max_no_tool_turns": 3,
+  "max_repeated_calls": 8,
+  "max_turns": 40
+}

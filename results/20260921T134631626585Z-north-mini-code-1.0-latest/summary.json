@@ -1,0 +1,252 @@
+{
+  "schema_version": "1.0",
+  "runs": [
+    {
+      "model": "north-mini-code-1.0:latest",
+      "track": "zero_to_one",
+      "task": "A00",
+      "started_at": "2026-09-21T14:21:34.587321+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "context_exceeded",
+        "error": null,
+        "summary": "",
+        "turns": 38,
+        "last_prompt_tokens": 40399,
+        "prompt_tokens": 604062,
+        "completion_tokens": 30277,
+        "duration_seconds": 2028.509
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 0,
+      "code_health_score": 70.0,
+      "workspace": "./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/zero_to_one/A00/workspace",
+      "run_dir": "./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/zero_to_one/A00",
+      "agent_status": "context_exceeded",
+      "turns": 38,
+      "prompt_tokens": 604062,
+      "completion_tokens": 30277,
+      "duration_seconds": 2028.509
+    },
+    {
+      "model": "north-mini-code-1.0:latest",
+      "track": "controlled_cold_change",
+      "task": "C01",
+      "started_at": "2026-09-21T14:38:01.103201+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "max_turns",
+        "error": null,
+        "summary": "",
+        "turns": 40,
+        "last_prompt_tokens": 30445,
+        "prompt_tokens": 598728,
+        "completion_tokens": 14025,
+        "duration_seconds": 972.319
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 45,
+      "code_health_score": 90.0,
+      "workspace": "./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/controlled_cold_change/C01/workspace",
+      "run_dir": "./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/controlled_cold_change/C01",
+      "agent_status": "max_turns",
+      "turns": 40,
+      "prompt_tokens": 598728,
+      "completion_tokens": 14025,
+      "duration_seconds": 972.319
+    },
+    {
+      "model": "north-mini-code-1.0:latest",
+      "track": "controlled_cold_change",
+      "task": "C02",
+      "started_at": "2026-09-21T14:48:40.795217+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "completed",
+        "error": null,
+        "summary": "Implemented idempotency support for POST /orders endpoint with:\n1. Added Idempotency-Key header (required, ASCII 1-128 characters)\n2. Created IdempotencyRecord table for storing idempotency state\n3. Updated create_order function to:\n   - Check existing idempotency records before creating orders\n   - Return 409 IDEMPOTENCY_CONFLICT for request mismatches\n   - Return existing orders for identical requests\n   - Create idempotency records for successful/failed attempts\n4. Added comprehensive validation and error handling\n5. Created new migration (0002)\n6. All requirements met while maintaining existing API schema",
+        "turns": 38,
+        "last_prompt_tokens": 21245,
+        "prompt_tokens": 493338,
+        "completion_tokens": 9270,
+        "duration_seconds": 627.527
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "error",
+      "capability_score": 0,
+      "code_health_score": 85.0,
+      "workspace": "./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/controlled_cold_change/C02/workspace",
+      "run_dir": "./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/controlled_cold_change/C02",
+      "agent_status": "completed",
+      "turns": 38,
+      "prompt_tokens": 493338,
+      "completion_tokens": 9270,
+      "duration_seconds": 627.527
+    },
+    {
+      "model": "north-mini-code-1.0:latest",
+      "track": "controlled_cold_change",
+      "task": "C03",
+      "started_at": "2026-09-21T15:17:16.904206+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "max_turns",
+        "error": null,
+        "summary": "",
+        "turns": 40,
+        "last_prompt_tokens": 39401,
+        "prompt_tokens": 715684,
+        "completion_tokens": 22632,
+        "duration_seconds": 1701.421
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "completed",
+      "capability_score": 100,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/controlled_cold_change/C03/workspace",
+      "run_dir": "./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/controlled_cold_change/C03",
+      "agent_status": "max_turns",
+      "turns": 40,
+      "prompt_tokens": 715684,
+      "completion_tokens": 22632,
+      "duration_seconds": 1701.421
+    },
+    {
+      "model": "north-mini-code-1.0:latest",
+      "track": "controlled_cold_change",
+      "task": "C04",
+      "started_at": "2026-09-21T15:37:34.818876+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "max_turns",
+        "error": null,
+        "summary": "",
+        "turns": 40,
+        "last_prompt_tokens": 30899,
+        "prompt_tokens": 601186,
+        "completion_tokens": 17906,
+        "duration_seconds": 1205.37
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "error",
+      "capability_score": 0,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/controlled_cold_change/C04/workspace",
+      "run_dir": "./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/controlled_cold_change/C04",
+      "agent_status": "max_turns",
+      "turns": 40,
+      "prompt_tokens": 601186,
+      "completion_tokens": 17906,
+      "duration_seconds": 1205.37
+    },
+    {
+      "model": "north-mini-code-1.0:latest",
+      "track": "controlled_cold_change",
+      "task": "C05",
+      "started_at": "2026-09-21T16:11:04.461726+00:00",
+      "run_config": {
+        "adapter": "ollama",
+        "think": "on",
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95
+        },
+        "context_window": 65536,
+        "max_output_tokens": 24576,
+        "request_timeout_seconds": 1200,
+        "context_guard_tokens": 40960,
+        "max_no_tool_turns": 3,
+        "max_repeated_calls": 8,
+        "max_turns": 40
+      },
+      "agent": {
+        "status": "context_exceeded",
+        "error": null,
+        "summary": "",
+        "turns": 33,
+        "last_prompt_tokens": 39240,
+        "prompt_tokens": 666500,
+        "completion_tokens": 29206,
+        "duration_seconds": 1997.096
+      },
+      "public_tests_unchanged": true,
+      "evaluator_status": "error",
+      "capability_score": 0,
+      "code_health_score": 100.0,
+      "workspace": "./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/controlled_cold_change/C05/workspace",
+      "run_dir": "./results/20260921T134631626585Z-north-mini-code-1.0-latest/runs/north-mini-code-1.0-latest/controlled_cold_change/C05"
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..3aab5de 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,8 +1,11 @@
++import base64
++import hmac
++import os
+ import uuid
+ from collections import defaultdict
+ from typing import Any
+ 
+-from fastapi import Depends, FastAPI, Header, Request
++from fastapi import Depends, FastAPI, Header, Query, Request
+ from fastapi.exceptions import RequestValidationError
+ from fastapi.responses import JSONResponse
+ from sqlalchemy import select, text
+@@ -11,9 +14,35 @@ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+ from stockflow.models import Order, OrderItem, Product
+-from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
++from stockflow.schemas import Cursor, OrdersResponse, OrderCreate, OrderOut, ProductCreate, ProductOut
+ 
+ app = FastAPI(title="StockFlow Mini")
++CURSOR_SECRET = os.environ.get("CURSOR_SECRET", "benchmark-public-secret")
++
++
++def encode_cursor(created_at: datetime, order_id: uuid.UUID) -> str:
++    """Encode cursor with HMAC for tamper detection."""
++    data = f"{created_at.isoformat()}|{order_id}".encode("utf-8")
++    signature = hmac.new(CURSOR_SECRET.encode("utf-8"), data, "sha256").digest()
++    combined = signature + data
++    return base64.urlsafe_b64encode(combined).decode("utf-8")
++
++
++def decode_cursor(cursor: str) -> Cursor:
++    """Decode cursor and verify HMAC."""
++    try:
++        combined = base64.urlsafe_b64decode(cursor.encode("utf-8"))
++        if len(combined) < 32:
++            raise ValueError("Invalid cursor format")
++        signature = combined[:32]
++        data = combined[32:]
++        expected_signature = hmac.new(CURSOR_SECRET.encode("utf-8"), data, "sha256").digest()
++        if not hmac.compare_digest(signature, expected_signature):
++            raise ValueError("Invalid cursor signature")
++        created_at_str, order_id_str = data.decode("utf-8").split("|")
++        return Cursor(created_at=datetime.fromisoformat(created_at_str), id=uuid.UUID(order_id_str))
++    except Exception as exc:
++        raise ApiError(400, "INVALID_CURSOR", "Invalid cursor") from exc
+ 
+ 
+ class ApiError(Exception):
+@@ -191,3 +220,61 @@ def cancel_order(
+         raise
+     session.expire_all()
+     return load_order(session, tenant, order.id)
++
++
++@app.get("/orders", response_model=OrdersResponse)
++def list_orders(
++    status: str | None = Query(None),
++    created_from: datetime | None = Query(None),
++    created_to: datetime | None = Query(None),
++    cursor: str | None = Query(None),
++    limit: int = Query(..., ge=1, le=100),
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> OrdersResponse:
++    """List orders with cursor pagination."""
++    # Build base query with tenant filter
++    stmt = select(Order).where(Order.tenant_id == tenant)
++
++    # Apply optional filters
++    if status is not None:
++        stmt = stmt.where(Order.status == status)
++    if created_from is not None:
++        stmt = stmt.where(Order.created_at >= created_from)
++    if created_to is not None:
++        stmt = stmt.where(Order.created_at <= created_to)
++
++    # Order by created_at DESC, id DESC
++    stmt = stmt.order_by(Order.created_at.desc(), Order.id.desc())
++
++    # Handle cursor pagination
++    if cursor is not None:
++        cursor_data = decode_cursor(cursor)
++        # Filter must match cursor's tenant (already handled) and time boundaries if specified
++        # If a time boundary filter was provided, it must match the cursor's time
++        if created_from is not None and cursor_data.created_at < created_from:
++            raise ApiError(400, "INVALID_CURSOR", "Cursor is outside the specified time range")
++        if created_to is not None and cursor_data.created_at > created_to:
++            raise ApiError(400, "INVALID_CURSOR", "Cursor is outside the specified time range")
++        # Find the position after the cursor record
++        stmt = stmt.where(
++            (Order.created_at < cursor_data.created_at) | (
++                (Order.created_at == cursor_data.created_at) & (Order.id < cursor_data.id)
++            )
++        )
++
++    # Apply limit
++    stmt = stmt.limit(limit)
++
++    # Execute query
++    orders = session.execute(stmt).scalars().all()
++
++    # Build response
++    items = [load_order(session, tenant, order.id) for order in orders]
++    next_cursor = None
++
++    if orders:
++        last_order = orders[-1]
++        next_cursor = encode_cursor(last_order.created_at, last_order.id)
++
++    return OrdersResponse(items=items, next_cursor=next_cursor)
+diff --git a/stockflow/schemas.py b/stockflow/schemas.py
+index dceb05f..023e493 100755
+--- a/stockflow/schemas.py
++++ b/stockflow/schemas.py
+@@ -50,3 +50,13 @@ class OrderOut(BaseModel):
+     updated_at: datetime
+     items: list[OrderItemOut]
+ 
++
++class Cursor(BaseModel):
++    created_at: datetime
++    id: uuid.UUID
++
++
++class OrdersResponse(BaseModel):
++    items: list[OrderOut]
++    next_cursor: str | None = None
++

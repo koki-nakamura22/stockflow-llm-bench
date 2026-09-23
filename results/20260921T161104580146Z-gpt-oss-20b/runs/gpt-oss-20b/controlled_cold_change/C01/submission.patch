@@ -1,0 +1,190 @@
+diff --git a/stockflow/main.py b/stockflow/main.py
+index f3b0dd3..784271b 100755
+--- a/stockflow/main.py
++++ b/stockflow/main.py
+@@ -1,6 +1,6 @@
+ import uuid
+ from collections import defaultdict
+-from typing import Any
++from typing import Any, Optional
+ 
+ from fastapi import Depends, FastAPI, Header, Request
+ from fastapi.exceptions import RequestValidationError
+@@ -11,9 +11,24 @@ from sqlalchemy.orm import Session, selectinload
+ 
+ from stockflow.db import get_session
+ from stockflow.models import Order, OrderItem, Product
+-from stockflow.schemas import OrderCreate, OrderOut, ProductCreate, ProductOut
++from stockflow.schemas import (
++    OrderCreate,
++    OrderOut,
++    ProductCreate,
++    ProductOut,
++)
++
++# ---------- Helper imports for cursor pagination ----------
++import base64
++import hmac
++import hashlib
++import json
++import os
++from datetime import datetime
++from pydantic import BaseModel
+ 
+ app = FastAPI(title="StockFlow Mini")
++CURSOR_SECRET = os.getenv("CURSOR_SECRET", "")
+ 
+ 
+ class ApiError(Exception):
+@@ -24,14 +39,14 @@ class ApiError(Exception):
+         self.details = details or {}
+ 
+ 
+-def error_body(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
+-    return {"error": {"code": code, "message": message, "details": details or {}}}
++# ---- Exception handlers ----
+ 
+ 
+ @app.exception_handler(ApiError)
+ def api_error_handler(_request: Request, exc: ApiError) -> JSONResponse:
+     return JSONResponse(
+-        status_code=exc.status, content=error_body(exc.code, exc.message, exc.details)
++        status_code=exc.status,
++        content={"error": {"code": exc.code, "message": exc.message, "details": exc.details}},
+     )
+ 
+ 
+@@ -39,10 +54,12 @@ def api_error_handler(_request: Request, exc: ApiError) -> JSONResponse:
+ def validation_error_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+     return JSONResponse(
+         status_code=422,
+-        content=error_body("VALIDATION_ERROR", "Invalid request", {"errors": exc.errors()}),
++        content={"error": {"code": "VALIDATION_ERROR", "message": "Invalid request", "details": {"errors": exc.errors()}}},
+     )
+ 
+ 
++# ---------- Dependencies ----------
++
+ def tenant_id(x_tenant_id: str | None = Header(default=None)) -> uuid.UUID:
+     try:
+         if x_tenant_id is None:
+@@ -52,6 +69,8 @@ def tenant_id(x_tenant_id: str | None = Header(default=None)) -> uuid.UUID:
+         raise ApiError(400, "INVALID_TENANT", "X-Tenant-Id must be a UUID") from exc
+ 
+ 
++# ---------- Internal helper ----------
++
+ def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: bool = False) -> Order:
+     stmt = (
+         select(Order)
+@@ -66,6 +85,36 @@ def load_order(session: Session, tenant: uuid.UUID, order_id: uuid.UUID, lock: b
+     return order
+ 
+ 
++# ---------- Cursor Pagination helpers ----------
++
++def _cursor_payload(secret: str, params: dict) -> str:
++    payload_json = json.dumps(params, separators=(",", ":"), sort_keys=True)
++    payload_bytes = payload_json.encode("utf-8")
++    signature = hmac.new(secret.encode("utf-8"), payload_bytes, hashlib.sha256).hexdigest()
++    encoded_payload = base64.urlsafe_b64encode(payload_bytes).decode("utf-8")
++    return f"{encoded_payload}.{signature}"
++
++
++def _decode_cursor(secret: str, cursor: str) -> dict:
++    try:
++        encoded_payload, signature = cursor.rsplit(".", 1)
++        payload_bytes = base64.urlsafe_b64decode(encoded_payload.encode("utf-8"))
++        expected_sig = hmac.new(secret.encode("utf-8"), payload_bytes, hashlib.sha256).hexdigest()
++        if not hmac.compare_digest(expected_sig, signature):
++            raise ValueError("Invalid signature")
++        payload_json = payload_bytes.decode("utf-8")
++        return json.loads(payload_json)
++    except Exception as exc:
++        raise ApiError(400, "INVALID_CURSOR", "Invalid cursor") from exc
++
++
++class OrdersResponse(BaseModel):
++    items: list[OrderOut]
++    next_cursor: Optional[str]
++
++
++# ---------- Routes ----------
++
+ @app.get("/health")
+ def health(session: Session = Depends(get_session)) -> dict[str, str]:
+     session.execute(text("SELECT 1"))
+@@ -191,3 +240,73 @@ def cancel_order(
+         raise
+     session.expire_all()
+     return load_order(session, tenant, order.id)
++
++
++# -----------------------------------
++# GET /orders with cursor pagination
++# -----------------------------------
++
++@app.get("/orders", response_model=OrdersResponse)
++def list_orders(
++    limit: int,
++    status: Optional[str] = None,
++    created_from: Optional[datetime] = None,
++    created_to: Optional[datetime] = None,
++    cursor: Optional[str] = None,
++    tenant: uuid.UUID = Depends(tenant_id),
++    session: Session = Depends(get_session),
++) -> OrdersResponse:
++    if limit < 1 or limit > 100:
++        raise ApiError(400, "INVALID_LIMIT", "Limit must be between 1 and 100")
++
++    # Decode cursor if provided
++    last_created_at: Optional[datetime] = None
++    last_id: Optional[uuid.UUID] = None
++    if cursor is not None:
++        cursor_payload = _decode_cursor(CURSOR_SECRET, cursor)
++        # Validate filter consistency
++        if cursor_payload.get("status") != (status if status is not None else None):
++            raise ApiError(400, "INVALID_CURSOR", "Filter mismatch with cursor")
++        if cursor_payload.get("created_from") != (created_from.isoformat() if created_from else None):
++            raise ApiError(400, "INVALID_CURSOR", "Filter mismatch with cursor")
++        if cursor_payload.get("created_to") != (created_to.isoformat() if created_to else None):
++            raise ApiError(400, "INVALID_CURSOR", "Filter mismatch with cursor")
++        if cursor_payload.get("limit") != limit:
++            raise ApiError(400, "INVALID_CURSOR", "Filter mismatch with cursor")
++        last_created_at_str = cursor_payload.get("last_created_at")
++        last_id_str = cursor_payload.get("last_id")
++        if last_created_at_str is None or last_id_str is None:
++            raise ApiError(400, "INVALID_CURSOR", "Invalid cursor data")
++        last_created_at = datetime.fromisoformat(last_created_at_str)
++        last_id = uuid.UUID(last_id_str)
++
++    stmt = select(Order).where(Order.tenant_id == tenant)
++    if status is not None:
++        stmt = stmt.where(Order.status == status)
++    if created_from is not None:
++        stmt = stmt.where(Order.created_at >= created_from)
++    if created_to is not None:
++        stmt = stmt.where(Order.created_at <= created_to)
++    if last_created_at is not None:
++        stmt = stmt.where(
++            (Order.created_at < last_created_at) |
++            ((Order.created_at == last_created_at) & (Order.id < last_id))
++        )
++    stmt = stmt.order_by(Order.created_at.desc(), Order.id.desc()).options(selectinload(Order.items))
++    fetch_limit = limit + 1
++    results = session.scalars(stmt.limit(fetch_limit)).all()
++    has_more = len(results) > limit
++    orders_list = results[:limit]
++    next_cursor: Optional[str] = None
++    if has_more and orders_list:
++        last_order = orders_list[-1]
++        cursor_dict = {
++            "status": status,
++            "created_from": created_from.isoformat() if created_from else None,
++            "created_to": created_to.isoformat() if created_to else None,
++            "limit": limit,
++            "last_created_at": last_order.created_at.isoformat(),
++            "last_id": str(last_order.id),
++        }
++        next_cursor = _cursor_payload(CURSOR_SECRET, cursor_dict)
++    return OrdersResponse(items=orders_list, next_cursor=next_cursor)
