@@ -3,6 +3,19 @@
 このディレクトリの配布物のバージョンと、ローカルで加えた変更の記録。
 バージョンの正は `pyproject.toml` と `config/run.yaml` の `benchmark_version`。
 
+## 0.2.3 — 2026-10-22
+
+eMudhra(emSign)の中間証明書の秘密鍵漏えいへの対応。certifi 2026.10.19 で関連するルート CA 証明書が外され、certifi を同梱する pip も 26.2.2 で更新された。
+
+### 変更
+
+- **image 内の pip を 26.2.2 以上に上げてから `pip install` する**(`evaluator/Dockerfile`, `platform-skeleton/Dockerfile`, `reference/base/Dockerfile`)
+  - `python:3.12-slim` 付属の pip は、古い certifi を同梱したまま依存を取りに行っていた。
+  - 既存の `RUN pip install` の行に `pip install -U "pip>=26.2.2" &&` を前置した(layer 数は変えない)。
+  - アプリの依存とコードは変わらないので、0.2.2 以前の結果との比較には影響しない。`platform-skeleton/` の tree が変わるため、今後の run の `baseline_tree_sha` は 0.2.2 以前と異なる。
+  - 検証: 3 image を `docker build --pull --no-cache` で作り直し、いずれも `pip 26.2.2`、skeleton と reference/base は `make` が通ることを確認。
+- version 0.2.3。
+
 ## 0.2.2 — 2026-09-22
 
 Round 2(候補 6 モデル、`scripts/run_cohort_round2.sh`)の途中で見つかった 2 件。
