@@ -1,4 +1,4 @@
-benchmark_version: "0.2.2"
+benchmark_version: "0.2.3"
 # Cohort "practical settings" (2026-09-21). Sources and quotes: VENDOR_SETTINGS.md
 # Every model runs at its vendor-recommended sampling values with thinking on. Values are passed
 # explicitly on the CLI (scripts/run_cohort.sh) and recorded in results/<group>/run-config.json.
